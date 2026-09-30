@@ -28,6 +28,8 @@ enum Theme {
     static let irisText = Color(hex: 0xC9CDF9)
     static let ok = Color(hex: 0x62D394)
     static let okText = Color(hex: 0x8FE0B0)
+    static let danger = Color(hex: 0xEF6F6C)
+    static let dangerText = Color(hex: 0xF4A3A1)
     static let wait = Color(hex: 0xF2C14E)
     static let waitText = Color(hex: 0xF5D98A)
 
@@ -161,8 +163,10 @@ struct KeyCap: View {
     var body: some View {
         Text(text)
             .font(Theme.mono(10.5))
+            .tracking(2)
             .foregroundStyle(dark ? Theme.emberDark : Theme.faded)
-            .padding(.horizontal, 5)
+            .padding(.leading, 7)
+            .padding(.trailing, 5)
             .padding(.vertical, 1)
             .background(
                 RoundedRectangle(cornerRadius: 5)

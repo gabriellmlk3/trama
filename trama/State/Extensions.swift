@@ -48,6 +48,16 @@ extension Finding {
         }
     }
 
+    var hasDiff: Bool {
+        switch type {
+        case FindingType.editOnBase, FindingType.forgottenChange, FindingType.looseWorktree:
+            return path != nil
+        case FindingType.unpushed, FindingType.noRemote:
+            return path != nil && branch != nil
+        default: return false
+        }
+    }
+
     var resolvable: Bool {
         switch type {
         case FindingType.editOnBase, FindingType.forgottenChange: return suggestedTrama != nil

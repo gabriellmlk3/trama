@@ -7,7 +7,18 @@ private let rowHeight: CGFloat = 84
 
 struct TramaDetailView: View {
     @EnvironmentObject var model: AppModel
+    @AppStorage("capsulePanelVisible") private var capsuleVisible = true
+    @AppStorage("detailMode") private var modeName = DetailMode.loom.rawValue
+    @State private var refreshToken = 0
+    @State private var refreshing = false
     let trama: LiveTrama
+
+    var mode: Binding<DetailMode> {
+        Binding(
+            get: { DetailMode(rawValue: modeName) ?? .loom },
+            set: { modeName = $0.rawValue }
+        )
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -15,24 +26,34 @@ struct TramaDetailView: View {
             Rectangle().fill(Theme.line).frame(height: 1)
             HStack(spacing: 0) {
                 VStack(alignment: .leading, spacing: 14) {
-                    LoomTitle()
-                    ScrollView {
-                        VStack(alignment: .leading, spacing: 14) {
-                            LoomView(selected: trama)
-                            LoomLegend(trama: trama)
+                    DetailBar(mode: mode, capsuleVisible: $capsuleVisible, refreshing: refreshing) { refreshToken += 1 }
+                    switch mode.wrappedValue {
+                    case .loom:
+                        ScrollView {
+                            VStack(alignment: .leading, spacing: 14) {
+                                LoomView(selected: trama)
+                                LoomLegend(trama: trama)
+                            }
                         }
+                        .scrollIndicators(.automatic)
+                        CapsuleComposer(trama: trama)
+                    case .git:
+                        GitView(trama: trama, refreshToken: refreshToken, refreshing: $refreshing)
                     }
-                    .scrollIndicators(.automatic)
-                    CapsuleComposer(trama: trama)
                 }
                 .padding(.horizontal, 28)
                 .padding(.top, 20)
                 .padding(.bottom, 22)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-                Rectangle().fill(Theme.line).frame(width: 1)
-                CapsulePanel(trama: trama)
-                    .frame(width: 372)
+                if capsuleVisible {
+                    Rectangle().fill(Theme.line).frame(width: 1)
+                    CapsulePanel(trama: trama)
+                        .frame(width: 372)
+                        .transition(.move(edge: .trailing).combined(with: .opacity))
+                }
             }
+            .animation(.easeInOut(duration: 0.22), value: capsuleVisible)
+            .clipped()
         }
     }
 }
@@ -135,19 +156,6 @@ struct TramaHeader: View {
             Button("Cancelar", role: .cancel) {}
         } message: {
             Text("Os worktrees são removidos; as branches \(trama.branch) continuam em cada repositório e a cápsula fica guardada. Se houver mudanças não commitadas, o arquivamento é recusado.")
-        }
-    }
-}
-
-struct LoomTitle: View {
-    var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 10) {
-            Text("O tear")
-                .font(.system(size: 13, weight: .semibold))
-            Text("repositórios × tramas · cada ponto é um worktree vivo")
-                .font(.system(size: 12))
-                .foregroundStyle(Theme.faded)
-            Spacer()
         }
     }
 }

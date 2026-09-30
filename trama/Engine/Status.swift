@@ -13,6 +13,7 @@ public struct RepoStatus: Codable, Hashable, Identifiable, Sendable {
     public var path: String
     public var exists = false
     public var base: String
+    public var branch = ""
     public var ahead = 0
     public var behind = 0
     public var changed = 0
@@ -105,6 +106,7 @@ extension Workspace {
             s.changed = lines.count
         }
         s.lastCommit = Git.lastCommit(wt)
+        s.branch = Git.currentBranchName(wt)
         if predictConflict && s.behind > 0 {
             s.conflict = s.ahead == 0 ? "limpo" : Git.predictedConflict(wt, ref)
         }

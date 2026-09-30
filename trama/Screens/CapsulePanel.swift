@@ -57,6 +57,7 @@ struct CapsulePanel: View {
 
 struct CapsuleHeader: View {
     @EnvironmentObject var model: AppModel
+    @AppStorage("capsulePanelVisible") private var capsuleVisible = true
     let trama: LiveTrama
     let capsule: TramaCapsule?
 
@@ -82,6 +83,14 @@ struct CapsuleHeader: View {
                 .buttonStyle(IconButton(size: 28))
                 .help("Abrir a cápsula no editor")
                 .accessibilityLabel("Abrir a cápsula no editor")
+                Button {
+                    withAnimation(.easeInOut(duration: 0.18)) { capsuleVisible = false }
+                } label: {
+                    Image(systemName: "sidebar.right")
+                }
+                .buttonStyle(IconButton(size: 28))
+                .help("Ocultar a cápsula")
+                .accessibilityLabel("Ocultar a cápsula")
             }
             Text(Paths.abbreviate(capsule?.path ?? trama.capsule))
                 .font(Theme.mono(11.5))

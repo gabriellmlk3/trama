@@ -132,12 +132,28 @@ struct FilterChip: View {
 struct FindingRow: View {
     @EnvironmentObject var model: AppModel
     let finding: Finding
+    @State private var expanded = false
 
     var highlighted: Bool {
         finding.type == FindingType.editOnBase && finding.resolvable
     }
 
     var body: some View {
+        VStack(spacing: 0) {
+            summary
+            if expanded {
+                FindingDiffView(finding: finding)
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 16)
+                    .transition(.opacity.combined(with: .offset(y: -6)))
+            }
+        }
+        .background(RoundedRectangle(cornerRadius: 12).fill(highlighted ? Color(hex: 0x14110F) : Color(hex: 0x111217)))
+        .overlay(RoundedRectangle(cornerRadius: 12).stroke(highlighted ? Theme.ember.opacity(0.35) : Theme.line, lineWidth: 1))
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+    }
+
+    var summary: some View {
         HStack(spacing: 18) {
             Image(systemName: finding.symbol)
                 .font(.system(size: 14))
@@ -183,13 +199,22 @@ struct FindingRow: View {
 
             HStack(spacing: 8) {
                 actions
+                if finding.hasDiff {
+                    Button {
+                        withAnimation(.spring(response: 0.34, dampingFraction: 0.86)) { expanded.toggle() }
+                    } label: {
+                        Image(systemName: "chevron.down")
+                            .rotationEffect(.degrees(expanded ? 180 : 0))
+                    }
+                    .buttonStyle(IconButton(size: 28))
+                    .help(expanded ? "Ocultar as diferenças" : "Ver as diferenças")
+                    .accessibilityLabel(expanded ? "Ocultar as diferenças" : "Ver as diferenças")
+                }
             }
-            .frame(width: 250, alignment: .trailing)
+            .frame(width: 290, alignment: .trailing)
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 13)
-        .background(RoundedRectangle(cornerRadius: 12).fill(highlighted ? Color(hex: 0x14110F) : Color(hex: 0x111217)))
-        .overlay(RoundedRectangle(cornerRadius: 12).stroke(highlighted ? Theme.ember.opacity(0.35) : Theme.line, lineWidth: 1))
     }
 
     var detailLine: String {
@@ -248,6 +273,75 @@ struct FindingRow: View {
             .buttonStyle(IconButton(size: 28))
             .help("Copiar: \(cmd)")
             .accessibilityLabel("Copiar comando")
+        }
+    }
+}
+
+struct FindingDiffView: View {
+    let finding: Finding
+    @State private var result: FindingChanges?
+    @State private var error: String?
+    @State private var selectedFile: String?
+    @State private var diff: [DiffLine] = []
+    @State private var diffFile: String?
+
+    var selected: FileChange? { result?.changes.first(where: { $0.id == selectedFile }) }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            if let r = result {
+                if !r.commits.isEmpty {
+                    CommitsPane(commits: Array(r.commits.prefix(6)), total: r.commitCount, tint: Theme.emberLight, empty: "")
+                }
+                if r.changes.isEmpty {
+                    Text("Nenhuma diferença de arquivo.")
+                        .font(.system(size: 12.5))
+                        .foregroundStyle(Theme.faded)
+                } else {
+                    ViewThatFits(in: .horizontal) {
+                        HStack(alignment: .top, spacing: 14) {
+                            FileList(changes: r.changes, selectedFile: $selectedFile)
+                                .frame(width: 252)
+                            DiffPane(change: selected, lines: diff, path: finding.path ?? "")
+                        }
+                        VStack(spacing: 14) {
+                            FileList(changes: r.changes, selectedFile: $selectedFile)
+                            DiffPane(change: selected, lines: diff, path: finding.path ?? "")
+                        }
+                    }
+                }
+            } else if let error {
+                Text(error)
+                    .font(.system(size: 12.5))
+                    .foregroundStyle(Theme.waitText)
+            } else {
+                HStack(spacing: 10) {
+                    ProgressView().controlSize(.small)
+                    Text("lendo o Git…").font(.system(size: 12.5)).foregroundStyle(Theme.faded)
+                }
+            }
+        }
+        .task {
+            do {
+                let f = finding
+                let loaded = try await Core.run { try $0.findingChanges(f) }
+                withAnimation(.easeOut(duration: 0.25)) {
+                    result = loaded
+                    selectedFile = loaded.changes.first?.id
+                }
+            } catch {
+                self.error = errorMessage(error)
+            }
+        }
+        .task(id: selectedFile) {
+            guard let change = selected else { return }
+            let f = finding
+            if let lines = try? await Core.run({ try $0.findingFileDiff(f, change: change) }), change.id == selectedFile {
+                withAnimation(.easeOut(duration: 0.2)) {
+                    diff = lines
+                    diffFile = change.id
+                }
+            }
         }
     }
 }
