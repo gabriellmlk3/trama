@@ -256,10 +256,21 @@ final class AppModel: ObservableObject {
         if ok { await refreshFindings() }
     }
 
-    func openClaudeInAll(_ t: LiveTrama) {
+    func openClaudeInAll(_ t: LiveTrama, target: ClaudeTarget = .current) {
         for r in t.repos {
-            let path = worktreePath(t, r)
-            terminals.open(path: path, command: "claude", title: "\(r) · claude")
+            openClaude(path: worktreePath(t, r), repo: r, target: target)
+        }
+    }
+
+    func openClaude(path: String, repo: String, target: ClaudeTarget = .current) {
+        switch target {
+        case .cli:
+            terminals.open(path: path, command: "claude", title: "\(repo) · claude")
+        case .desktop:
+            guard let url = ClaudeTarget.desktopURL(folder: path), NSWorkspace.shared.open(url) else {
+                showError("Não consegui abrir o Claude Desktop. Ele está instalado?")
+                return
+            }
         }
     }
 

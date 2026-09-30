@@ -217,7 +217,7 @@ struct AgentMenuRow: View {
                 Button("Revisar") {
                     if let trama {
                         let path = model.worktreePath(trama, agent.repo)
-                        model.terminals.open(path: path, command: "claude", title: "\(agent.repo) · claude")
+                        model.openClaude(path: path, repo: agent.repo)
                     }
                     openApp()
                 }

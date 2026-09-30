@@ -7,9 +7,21 @@ struct PreferencesView: View {
     @State private var commandOn = Integration.isCommandInstalled()
     @State private var localError: String?
     @State private var defaultBranch = ""
+    @AppStorage(ClaudeTarget.storageKey) private var claudeTarget = ClaudeTarget.cli.rawValue
 
     var body: some View {
         Form {
+            Section {
+                Picker("Abrir o Claude em", selection: $claudeTarget) {
+                    ForEach(ClaudeTarget.allCases) { Text($0.label).tag($0.rawValue) }
+                }
+                .pickerStyle(.segmented)
+            } footer: {
+                Text("Vale para “Abrir no Claude”, “Revisar” e para abrir agentes ao criar uma trama.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
             Section {
                 LabeledContent("Hooks do Claude Code") {
                     HStack(spacing: 10) {
