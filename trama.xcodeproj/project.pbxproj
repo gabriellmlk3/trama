@@ -6,6 +6,10 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		AA12F5A1306D8EBD00D49D0C /* SwiftTerm in Frameworks */ = {isa = PBXBuildFile; productRef = AA12F5A2306D8EBD00D49D0C /* SwiftTerm */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXContainerItemProxy section */
 		AAA0A604306D51FA00B0FFCE /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
@@ -24,7 +28,7 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
-		AAA0A5F6306D51F800B0FFCE /* trama.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = trama.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		AAA0A5F6306D51F800B0FFCE /* Trama.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Trama.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		AAA0A603306D51FA00B0FFCE /* tramaTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = tramaTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		AAA0A60D306D51FA00B0FFCE /* tramaUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = tramaUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
@@ -52,6 +56,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				AA12F5A1306D8EBD00D49D0C /* SwiftTerm in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -85,7 +90,7 @@
 		AAA0A5F7306D51F800B0FFCE /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				AAA0A5F6306D51F800B0FFCE /* trama.app */,
+				AAA0A5F6306D51F800B0FFCE /* Trama.app */,
 				AAA0A603306D51FA00B0FFCE /* tramaTests.xctest */,
 				AAA0A60D306D51FA00B0FFCE /* tramaUITests.xctest */,
 			);
@@ -112,9 +117,10 @@
 			);
 			name = trama;
 			packageProductDependencies = (
+				AA12F5A2306D8EBD00D49D0C /* SwiftTerm */,
 			);
 			productName = trama;
-			productReference = AAA0A5F6306D51F800B0FFCE /* trama.app */;
+			productReference = AAA0A5F6306D51F800B0FFCE /* Trama.app */;
 			productType = "com.apple.product-type.application";
 		};
 		AAA0A602306D51FA00B0FFCE /* tramaTests */ = {
@@ -195,6 +201,9 @@
 			);
 			mainGroup = AAA0A5ED306D51F800B0FFCE;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				AA12F59C306D8EBD00D49D0C /* XCRemoteSwiftPackageReference "SwiftTerm" */,
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = AAA0A5F7306D51F800B0FFCE /* Products */;
 			projectDirPath = "";
@@ -398,11 +407,11 @@
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = 635S59BV9A;
-				ENABLE_APP_SANDBOX = YES;
+				ENABLE_APP_SANDBOX = NO;
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_PREVIEWS = YES;
-				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -410,13 +419,14 @@
 				);
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.br.trama.trama;
-				PRODUCT_NAME = "$(TARGET_NAME)";
+				PRODUCT_MODULE_NAME = trama;
+				PRODUCT_NAME = Trama;
 				REGISTER_APP_GROUPS = YES;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
-				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = nonisolated;
 				SWIFT_EMIT_LOC_STRINGS = YES;
-				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = NO;
 				SWIFT_VERSION = 5.0;
 			};
 			name = Debug;
@@ -430,11 +440,11 @@
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = 635S59BV9A;
-				ENABLE_APP_SANDBOX = YES;
+				ENABLE_APP_SANDBOX = NO;
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_PREVIEWS = YES;
-				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -442,13 +452,14 @@
 				);
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.br.trama.trama;
-				PRODUCT_NAME = "$(TARGET_NAME)";
+				PRODUCT_MODULE_NAME = trama;
+				PRODUCT_NAME = Trama;
 				REGISTER_APP_GROUPS = YES;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
-				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = nonisolated;
 				SWIFT_EMIT_LOC_STRINGS = YES;
-				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = NO;
 				SWIFT_VERSION = 5.0;
 			};
 			name = Release;
@@ -470,7 +481,7 @@
 				SWIFT_EMIT_LOC_STRINGS = NO;
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 5.0;
-				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/trama.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/trama";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Trama.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Trama";
 			};
 			name = Debug;
 		};
@@ -491,7 +502,7 @@
 				SWIFT_EMIT_LOC_STRINGS = NO;
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 5.0;
-				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/trama.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/trama";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Trama.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Trama";
 			};
 			name = Release;
 		};
@@ -573,6 +584,25 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		AA12F59C306D8EBD00D49D0C /* XCRemoteSwiftPackageReference "SwiftTerm" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/migueldeicaza/SwiftTerm";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 1.5.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		AA12F5A2306D8EBD00D49D0C /* SwiftTerm */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = AA12F59C306D8EBD00D49D0C /* XCRemoteSwiftPackageReference "SwiftTerm" */;
+			productName = SwiftTerm;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = AAA0A5EE306D51F800B0FFCE /* Project object */;
 }

@@ -1,17 +1,88 @@
-//
-//  tramaApp.swift
-//  trama
-//
-//  Created by Gabriel Olbrisch de Souza on 30/09/26.
-//
-
+import AppKit
+import Foundation
 import SwiftUI
 
+@MainActor
+final class AppDelegate: NSObject, NSApplicationDelegate {
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        NSApp.appearance = NSAppearance(named: .darkAqua)
+    }
+
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
+        false
+    }
+}
+
 @main
-struct tramaApp: App {
-    var body: some Scene {
-        WindowGroup {
-            ContentView()
+@MainActor
+enum EntryPoint {
+    static func main() {
+        if CLI.shouldRunAsCLI(CommandLine.arguments) {
+            exit(CLI.main())
         }
+        TramaApp.main()
+    }
+}
+
+struct TramaApp: App {
+    @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
+    @StateObject private var model = AppModel()
+
+    var body: some Scene {
+        WindowGroup("Trama", id: "principal") {
+            ContentView()
+                .environmentObject(model)
+        }
+        .windowStyle(.hiddenTitleBar)
+        .defaultSize(width: 1360, height: 860)
+        .commands {
+            CommandGroup(replacing: .newItem) {
+                Button("Nova trama…") { model.showingNewTrama = true }
+                    .keyboardShortcut("n")
+            }
+            CommandMenu("Trama") {
+                Button("Abrir no Claude") {
+                    if let t = model.selectedTrama { model.openClaudeInAll(t) }
+                }
+                .keyboardShortcut(.return, modifiers: [.command])
+                .disabled(model.selectedTrama == nil)
+                Button("Estacionar trama") {
+                    if let t = model.selectedTrama, t.isActive {
+                        Task { await model.park(t.slug) }
+                    }
+                }
+                .keyboardShortcut("p", modifiers: [.command, .shift])
+                .disabled(model.selectedTrama?.isActive != true)
+                Divider()
+                Button("Achados & perdidos") { model.screen = .findings }
+                    .keyboardShortcut("l", modifiers: [.command, .shift])
+                Button("Atualizar e buscar remotos") {
+                    Task {
+                        await model.fetchRemotes()
+                        await model.refreshFindings()
+                    }
+                }
+                .keyboardShortcut("r")
+                Divider()
+                Button("Alternar terminal") {
+                    model.terminals.expanded.toggle()
+                }
+                .keyboardShortcut("`", modifiers: [.command])
+                .disabled(model.terminals.sessions.isEmpty)
+            }
+        }
+
+        Settings {
+            PreferencesView()
+                .environmentObject(model)
+        }
+
+        MenuBarExtra {
+            MenuBarView()
+                .environmentObject(model)
+        } label: {
+            Image("MenuBarIcon")
+        }
+        .menuBarExtraStyle(.window)
     }
 }

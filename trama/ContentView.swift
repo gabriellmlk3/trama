@@ -1,24 +1,141 @@
-//
-//  ContentView.swift
-//  trama
-//
-//  Created by Gabriel Olbrisch de Souza on 30/09/26.
-//
-
+import Foundation
 import SwiftUI
 
 struct ContentView: View {
+    @EnvironmentObject var model: AppModel
+
     var body: some View {
-        VStack {
-            Image(systemName: "globe")
-                .imageScale(.large)
-                .foregroundStyle(.tint)
-            Text("Hello, world!")
+        Group {
+            if model.needsSetup {
+                SetupView()
+            } else {
+                VStack(spacing: 0) {
+                    HStack(spacing: 0) {
+                        Sidebar()
+                            .frame(width: 264)
+                        Rectangle().fill(Theme.line).frame(width: 1)
+                        DetailView()
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    }
+                    .frame(maxHeight: .infinity)
+                    TerminalDrawer(store: model.terminals)
+                }
+            }
         }
-        .padding()
+        .frame(minWidth: 1180, minHeight: 700)
+        .background(Theme.background)
+        .foregroundStyle(Theme.text)
+        .preferredColorScheme(.dark)
+        .sheet(isPresented: $model.showingNewTrama) {
+            NewTramaView()
+                .environmentObject(model)
+        }
+        .sheet(item: $model.resuming) { t in
+            ResumeView(trama: t)
+                .environmentObject(model)
+        }
+        .overlay(alignment: .bottom) {
+            Banners()
+        }
+        .onAppear { model.start() }
     }
 }
 
-#Preview {
-    ContentView()
+struct DetailView: View {
+    @EnvironmentObject var model: AppModel
+
+    var body: some View {
+        switch model.screen {
+        case .findings?:
+            FindingsView()
+        case .trama?:
+            if let t = model.selectedTrama {
+                TramaDetailView(trama: t)
+            } else {
+                EmptyStateView()
+            }
+        case nil:
+            EmptyStateView()
+        }
+    }
+}
+
+struct EmptyStateView: View {
+    @EnvironmentObject var model: AppModel
+
+    var body: some View {
+        VStack(spacing: 18) {
+            TramaLogo(size: 56)
+            Text("Pare de trocar de branch.")
+                .font(Theme.serif(38))
+            Text("Crie uma trama: a mesma branch em vários repositórios, cada um no seu worktree, com uma cápsula de contexto que os agentes leem e escrevem.")
+                .font(.system(size: 14))
+                .foregroundStyle(Theme.text3)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: 520)
+            Button {
+                model.showingNewTrama = true
+            } label: {
+                HStack(spacing: 8) {
+                    Text("Tecer a primeira trama")
+                    KeyCap(text: "⌘N", dark: true)
+                }
+            }
+            .buttonStyle(EmberButton())
+            .disabled(model.repos.isEmpty)
+            if model.repos.isEmpty {
+                Button("Cadastrar repositórios…") {
+                    let folders = Terminal.choosePaths(multiple: true, title: "Escolha os repositórios que podem entrar em tramas")
+                    Task { await model.addRepos(folders) }
+                }
+                .buttonStyle(GhostButton())
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
+
+struct Banners: View {
+    @EnvironmentObject var model: AppModel
+
+    var body: some View {
+        VStack(spacing: 8) {
+            if let notice = model.notice {
+                HStack(spacing: 8) {
+                    Image(systemName: "checkmark").foregroundStyle(Theme.okText)
+                    Text(notice).foregroundStyle(Theme.text2)
+                }
+                .font(.system(size: 12.5))
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
+                .background(RoundedRectangle(cornerRadius: 10).fill(Theme.surface2))
+                .overlay(RoundedRectangle(cornerRadius: 10).stroke(Theme.line2, lineWidth: 1))
+            }
+            if let error = model.error {
+                HStack(alignment: .top, spacing: 10) {
+                    Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(Theme.waitText)
+                    Text(error)
+                        .foregroundStyle(Theme.text2)
+                        .textSelection(.enabled)
+                        .frame(maxWidth: 560, alignment: .leading)
+                    Button {
+                        model.error = nil
+                    } label: {
+                        Image(systemName: "xmark")
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(Theme.faded)
+                    .accessibilityLabel("Fechar aviso")
+                }
+                .font(.system(size: 12.5))
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
+                .background(RoundedRectangle(cornerRadius: 10).fill(Color(hex: 0x1C1812)))
+                .overlay(RoundedRectangle(cornerRadius: 10).stroke(Theme.wait.opacity(0.45), lineWidth: 1))
+            }
+        }
+        .padding(.bottom, 18)
+        .animation(.easeOut(duration: 0.2), value: model.notice)
+        .animation(.easeOut(duration: 0.2), value: model.error)
+    }
 }
