@@ -26,6 +26,7 @@ struct CLITool: Sendable {
         process.arguments = args
         process.currentDirectoryURL = URL(fileURLWithPath: dir)
         var env = ProcessInfo.processInfo.environment
+        for (key, value) in GitCredentials.cliEnvironment(tool: name) where env[key] == nil { env[key] = value }
         for (key, value) in environment { env[key] = value }
         process.environment = env
         let output = Pipe()

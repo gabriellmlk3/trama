@@ -7,7 +7,24 @@ public struct GitError: Error, LocalizedError, CustomStringConvertible {
 
     public var description: String {
         let m = stderr.trimmingCharacters(in: .whitespacesAndNewlines)
+        if isAuthenticationFailure {
+            return "sem acesso ao remoto: entre na conta do provedor em Ajustes › Contas Git (token ou login pela CLI) e tente de novo.\n\(m)"
+        }
         return "git \(args.joined(separator: " ")): \(m.isEmpty ? "código \(code)" : m)"
+    }
+
+    var isAuthenticationFailure: Bool {
+        let text = stderr.lowercased()
+        return [
+            "could not read username",
+            "could not read password",
+            "authentication failed",
+            "terminal prompts disabled",
+            "http basic: access denied",
+            "permission denied (publickey",
+            "invalid username or token",
+            "returned error: 403"
+        ].contains { text.contains($0) }
     }
 
     public var errorDescription: String? { description }
@@ -39,6 +56,7 @@ enum Git {
         env["GIT_TERMINAL_PROMPT"] = "0"
         env["GIT_OPTIONAL_LOCKS"] = "0"
         env["LC_ALL"] = "C"
+        for (key, value) in GitCredentials.gitEnvironment() where env[key] == nil { env[key] = value }
         if env["GIT_SSH_COMMAND"] == nil {
             env["GIT_SSH_COMMAND"] = "ssh -o BatchMode=yes"
         }

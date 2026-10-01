@@ -197,6 +197,7 @@ struct GitView: View {
                     selectedFile: $selectedFile,
                     diff: diffFile == selectedFile ? diff : []
                 )
+                .padding(.bottom, 28)
                 .id(name)
                 .transition(.opacity.combined(with: .offset(y: 8)))
             }
