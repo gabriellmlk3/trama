@@ -52,11 +52,16 @@ Convenções do projeto: veja `CLAUDE.md`. Lógica nova vai em `trama/Motor/` (s
 **Problema.** Abrir e ligar os PRs de cada repositório à mão, na ordem certa, é onde as coisas se perdem.
 
 **Como.**
-- Usar o `gh`. Para cada repositório com commits à frente da base: `git push -u`, depois `gh pr create --base <base> --head <branch>`, com título da trama e corpo gerado a partir da cápsula (objetivo, decisões).
+- Usar a CLI do provedor do repositório (`gh`, `az` ou `glab`; veja "Provedores" abaixo). Para cada repositório com commits à frente da base: `git push -u`, depois criar o PR com `--base <base>` e a branch da trama, com título da trama e corpo gerado a partir da cápsula (objetivo, decisões).
 - Depois de criar todos, editar os corpos para incluir links cruzados entre os PRs.
 - Ordem de merge configurável (ex.: API antes dos clientes), mostrada no corpo de cada PR.
-- `Trama` guarda as URLs dos PRs; o tear mostra o estado e o CI de cada um (`gh pr view --json state,statusCheckRollup`).
+- `Trama` guarda as URLs dos PRs; o tear mostra o estado e o CI de cada um (no GitHub, `gh pr view --json state,statusCheckRollup`; no Azure DevOps, as políticas de build do PR; no GitLab, o pipeline do MR).
 - Comando: `trama pr [--rascunho]`. Botão "Abrir PRs" no cabeçalho da trama.
+- Destino selecionável: o botão abre uma folha com uma linha por repositório (destino, commits à frente, conflito previsto contra o destino escolhido e situação do PR). "Todos para" aplica uma branch aos repositórios que a têm; cada linha pode ter o seu destino. A escolha fica em `destinosPR` na trama; PR aberto que aponta para outra branch é redirecionado (`gh pr edit --base`, `glab mr update --target-branch` ou, no Azure DevOps, `az devops invoke` com PATCH em `targetRefName`); PR mesclado ou fechado não é tocado. Outras tramas (`trama/…`) aparecem como destino para empilhar PRs.
+- Provedores: cada repositório abre PR no seu provedor, detectado pelo remoto `origin` (github.com ou host com "github" → GitHub; `dev.azure.com`, `*.visualstudio.com` ou URL com `/_git/` → Azure DevOps; gitlab.com ou host com "gitlab" → GitLab; bitbucket.org → Bitbucket). Um repositório pode fixar o provedor (`provedor` em `config.json`; Preferências ou `trama repo provedor <nome> <github|azure|gitlab|bitbucket|manual|auto>`), o que serve para hosts com domínio próprio. Variáveis `TRAMA_GH`, `TRAMA_AZ` e `TRAMA_GLAB` apontam para o executável de cada CLI.
+- Sem automação (Bitbucket, host desconhecido ou CLI não instalada) a branch sobe e o PR abre pelo link de "novo PR" do provedor, no navegador. Nada é gravado em `prs`, só o destino escolhido.
+- Limites por provedor: o Azure DevOps limita a descrição a 4000 caracteres (as decisões são cortadas, os links entre PRs ficam); trocar o destino de um PR no Azure depende de o recurso estar habilitado na organização.
+- Na linha de comando: `trama pr --base develop`, `--base api=staging,admin=develop`, `--repo a,b` para limitar a rodada e `--simular` para ver o plano sem enviar nada.
 
 **Pronto quando** um clique abre os PRs de todos os repositórios, ligados entre si, e o tear mostra o CI de cada um.
 

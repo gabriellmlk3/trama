@@ -16,10 +16,11 @@ public struct RepoConfig: Codable, Hashable, Identifiable, Sendable {
     public var services: [ServiceConfig] = []
     public var mergeRank = 0
     public var editor: String?
+    public var provider: ProviderKind?
 
     enum CodingKeys: String, CodingKey {
         case name = "nome", alias = "apelido", path = "caminho", label = "rotulo", base, copy = "copiar", run = "rodar"
-        case services = "servicos", mergeRank = "ordemMerge", editor
+        case services = "servicos", mergeRank = "ordemMerge", editor, provider = "provedor"
     }
 
     public var id: String { name }
@@ -43,6 +44,7 @@ extension RepoConfig {
         services = try c.decodeIfPresent([ServiceConfig].self, forKey: .services) ?? []
         mergeRank = try c.decodeIfPresent(Int.self, forKey: .mergeRank) ?? 0
         editor = try c.decodeIfPresent(String.self, forKey: .editor)
+        provider = try? c.decode(ProviderKind.self, forKey: .provider)
     }
 }
 
@@ -93,6 +95,7 @@ public struct Trama: Codable, Hashable, Identifiable, Sendable {
     public var context: String?
     public var portIndex: Int?
     public var prs: [String: String] = [:]
+    public var prBases: [String: String] = [:]
     public var createdAt: Int64
     public var parkedAt: Int64?
     public var updatedAt: Int64
@@ -104,7 +107,7 @@ public struct Trama: Codable, Hashable, Identifiable, Sendable {
 
     enum CodingKeys: String, CodingKey {
         case slug, title = "titulo", branch, base, repos, state = "estado", task = "tarefa", context = "contexto"
-        case portIndex = "indicePorta", prs, createdAt = "criadaEm", parkedAt = "estacionadaEm", updatedAt = "atualizadaEm"
+        case portIndex = "indicePorta", prs, prBases = "destinosPR", createdAt = "criadaEm", parkedAt = "estacionadaEm", updatedAt = "atualizadaEm"
     }
 
     init(slug: String, title: String, branch: String, base: String?, repos: [String], state: String, task: String?, createdAt: Int64) {
@@ -132,6 +135,7 @@ public struct Trama: Codable, Hashable, Identifiable, Sendable {
         context = try c.decodeIfPresent(String.self, forKey: .context)
         portIndex = try c.decodeIfPresent(Int.self, forKey: .portIndex)
         prs = try c.decodeIfPresent([String: String].self, forKey: .prs) ?? [:]
+        prBases = try c.decodeIfPresent([String: String].self, forKey: .prBases) ?? [:]
         createdAt = try c.decodeIfPresent(Int64.self, forKey: .createdAt) ?? 0
         parkedAt = try c.decodeIfPresent(Int64.self, forKey: .parkedAt)
         updatedAt = try c.decodeIfPresent(Int64.self, forKey: .updatedAt) ?? createdAt

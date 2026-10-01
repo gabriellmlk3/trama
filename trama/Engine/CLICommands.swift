@@ -5,8 +5,8 @@ extension CLI {
         "init": Command(summary: "configura a pasta das tramas e o repositório de contexto",
                         usage: "trama init [--raiz ~/Tramas] [--contexto <pasta do repo de contexto>]",
                         valueFlags: ["contexto"], run: cmdInit),
-        "repo": Command(summary: "cadastra repositórios (add, ls, rm, preparo, servico, ordem)",
-                        usage: "trama repo add <pasta>... [--apelido api] [--rotulo backend] [--base main]\n  trama repo ls\n  trama repo rm <nome>\n  trama repo preparo <nome> [--copiar \".env*,local.properties\"] [--rodar \"npm ci\"] [--limpar]\n  trama repo servico <nome> [--nome api --comando \"npm run dev\" --porta 3000] [--remover api]\n  trama repo ordem <nome> <n>   (ordem de merge dos PRs: menor primeiro)",
+        "repo": Command(summary: "cadastra repositórios (add, ls, rm, preparo, servico, ordem, provedor)",
+                        usage: "trama repo add <pasta>... [--apelido api] [--rotulo backend] [--base main]\n  trama repo ls\n  trama repo rm <nome>\n  trama repo preparo <nome> [--copiar \".env*,local.properties\"] [--rodar \"npm ci\"] [--limpar]\n  trama repo servico <nome> [--nome api --comando \"npm run dev\" --porta 3000] [--remover api]\n  trama repo ordem <nome> <n>   (ordem de merge dos PRs: menor primeiro)\n  trama repo provedor <nome> [github|azure|gitlab|bitbucket|manual|auto]   (onde os PRs são abertos; auto = detecta pelo remoto)",
                         valueFlags: ["apelido", "rotulo", "base", "copiar", "rodar", "nome", "comando", "porta", "remover"], run: cmdRepo),
         "nova": Command(summary: "cria uma trama: branch + worktree em cada repositório + cápsula",
                         usage: "trama nova \"Título\" --repos api,admin [--base main] [--tarefa CU-482] [--objetivo \"...\"] [--contexto <pasta>] [--slug x] [--sem-fetch]",
@@ -22,8 +22,8 @@ extension CLI {
         "subir": Command(summary: "sobe os serviços de desenvolvimento da trama, cada um na sua porta",
                          usage: "trama subir [--trama x] [--repo nome] [--servico nome]", valueFlags: ["trama", "repo", "servico"], run: cmdUp),
         "descer": Command(summary: "derruba os serviços da trama", usage: "trama descer [--trama x] [--repo nome] [--servico nome]", valueFlags: ["trama", "repo", "servico"], run: cmdDown),
-        "pr": Command(summary: "abre os PRs de todos os repositórios da trama, ligados entre si (usa o gh)",
-                      usage: "trama pr [--rascunho] [--trama x]\n  trama pr ls [--trama x]", valueFlags: ["trama"], run: cmdPullRequests),
+        "pr": Command(summary: "abre os PRs de todos os repositórios da trama, ligados entre si (GitHub com gh, Azure DevOps com az, GitLab com glab; outros pelo link)",
+                      usage: "trama pr [--rascunho] [--base develop | --base api=staging,admin=develop] [--repo a,b] [--simular] [--trama x]\n  trama pr ls [--trama x]", valueFlags: ["trama", "base", "repo"], run: cmdPullRequests),
         "merge": Command(summary: "traz os commits de uma trama para outra, nos repositórios que as duas têm",
                          usage: "trama merge <origem> [--para destino] [--repo a,b] [--permitir-conflito]", valueFlags: ["para", "repo"], run: cmdMerge),
         "preparar": Command(summary: "refaz o preparo dos worktrees (copia arquivos e roda a receita do repositório)", usage: "trama preparar <trama> [repo]", valueFlags: [], run: cmdPrepare),
@@ -108,6 +108,22 @@ extension CLI {
             guard let key = a.positional(1), let n = a.positional(2).flatMap({ Int($0) }) else { throw TramaError("uso: trama repo ordem <nome> <n>") }
             let r = try w.setMergeRank(key, n)
             c.ok("\(r.name): ordem de merge \(r.mergeRank)")
+        case "provedor":
+            guard let key = a.positional(1) else {
+                throw TramaError("uso: trama repo provedor <nome> [github|azure|gitlab|bitbucket|manual|auto]")
+            }
+            var r = try w.repo(key)
+            if let value = a.positional(2) {
+                let automatic = value.lowercased() == "auto" || value.lowercased() == "automatico"
+                let kind = automatic ? nil : ProviderKind.named(value)
+                guard automatic || kind != nil else {
+                    throw TramaError("provedor desconhecido: \(value) (use github, azure, gitlab, bitbucket, manual ou auto)")
+                }
+                r = try w.setProvider(r.name, kind)
+            }
+            let kind = w.providerKind(for: r)
+            if c.json { return try c.emitJSON(["repo": r.name, "provedor": kind.rawValue, "definido": r.provider == nil ? "nao" : "sim"]) }
+            c.line("\(r.name): \(kind.title)" + (r.provider == nil ? " (detectado pelo remoto)" : " (definido por você)"))
         case "servico":
             guard let key = a.positional(1) else { throw TramaError("uso: trama repo servico <nome> [--nome x --comando \"...\" --porta 3000] [--remover x]") }
             var r = try w.repo(key)
@@ -132,13 +148,13 @@ extension CLI {
             guard !w.config.repos.isEmpty else {
                 return c.line("Nenhum repositório cadastrado. Use: trama repo add <pasta>...")
             }
-            var rows = [["NOME", "APELIDO", "BASE", "RÓTULO", "PASTA"]]
+            var rows = [["NOME", "APELIDO", "BASE", "PROVEDOR", "RÓTULO", "PASTA"]]
             for r in w.config.repos {
-                rows.append([r.name, r.alias, r.base ?? "", r.label ?? "", Paths.abbreviate(r.path)])
+                rows.append([r.name, r.alias, r.base ?? "", w.providerKind(for: r).title, r.label ?? "", Paths.abbreviate(r.path)])
             }
             c.text(table(rows))
         default:
-            throw TramaError("subcomando desconhecido: \(a.positional(0) ?? "") (use add, ls, rm, preparo, servico ou ordem)")
+            throw TramaError("subcomando desconhecido: \(a.positional(0) ?? "") (use add, ls, rm, preparo, servico, ordem ou provedor)")
         }
     }
 
@@ -338,9 +354,37 @@ extension CLI {
             for i in infos { rows.append([i.repo, "#\(i.number)", i.draft ? "rascunho" : i.state, i.ci, i.url]) }
             return c.text(table(rows))
         }
-        let result = try w.openPullRequests(target.trama.slug, draft: a.has("rascunho"))
-        if c.json { return try c.emitJSON(result.prs) }
+        let trama = target.trama
+        var targets: [String: String] = [:]
+        if let spec = a.value("base") {
+            targets = try w.parsePullRequestTargets(spec, for: trama)
+        }
+        var only: Set<String>?
+        if let list = a.value("repo") {
+            let names = try list.split(separator: ",").map { try w.repo(String($0)).name }
+            only = Set(names)
+        }
+        if a.has("simular") || a.has("dry-run") {
+            _ = try w.remoteBranchCatalog(trama.slug, fetch: true)
+            let plan = try w.pullRequestPlan(trama.slug, targets: targets, existing: try w.existingPullRequests(trama.slug))
+                .filter { only?.contains($0.repo) ?? true }
+            if c.json { return try c.emitJSON(plan) }
+            var rows = [["ORDEM", "REPO", "PROVEDOR", "DESTINO", "COMMITS", "CONFLITO", "SITUAÇÃO"]]
+            for p in plan {
+                let conflict = p.conflictFiles.map { $0.isEmpty ? "nenhum" : "\($0.count) \(plural($0.count, "arquivo", "arquivos"))" } ?? "—"
+                rows.append(["\(p.order)", p.repo, p.provider.title, p.target, "↑\(p.ahead)", conflict, p.summary])
+            }
+            return c.text(table(rows))
+        }
+        let result = try w.openPullRequests(trama.slug, draft: a.has("rascunho"), targets: targets, only: only)
+        if c.json {
+            let links = result.manual.map { PullRequestInfo(repo: $0.repo, url: $0.url ?? "", number: 0, state: "manual", draft: false, ci: CIState.none) }
+            return try c.emitJSON(result.prs + links)
+        }
         for p in result.prs { c.ok("\(p.repo): \(p.url)") }
+        for m in result.manual {
+            c.line("  \(m.repo): branch enviada · abra o PR em \(m.target) pelo link (\(m.provider.title)): \(m.url ?? "sem endereço para este remoto")")
+        }
         c.warnings(result.warnings)
     }
 
