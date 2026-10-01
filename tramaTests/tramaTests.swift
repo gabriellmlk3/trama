@@ -882,6 +882,31 @@ final class FlowTests: XCTestCase {
         XCTAssertFalse(Git.branchExists(lab.repos["rebocs_api"]!, "trama/quebrada"))
         XCTAssertEqual(try w.tramas().count, 0)
     }
+
+    func testDirectMergeIntoSelectedBranches() throws {
+        let w = try lab.workspace()
+        for name in ["rebocs_api", "rebocs-admin"] {
+            try lab.git(lab.repos[name]!, "push", "-q", "origin", "main:develop")
+        }
+        let (t, _) = try w.newTrama(NewTramaOptions(title: "Direta", repos: ["api", "admin"], noFetch: true))
+        for name in ["rebocs_api", "rebocs-admin"] {
+            try lab.commit(w.worktreePath(t.slug, name), "feature.txt", "x\n", "feature")
+        }
+        let remote = "\(lab.root)/remotos"
+        // develop avança sozinho em um repo: exige commit de merge; o outro avança direto
+        try lab.pushToMain("rebocs_api", "outro.txt", "y\n", "outro")
+        try lab.git(lab.root + "/colega/rebocs_api", "push", "-q", "origin", "main:develop")
+
+        let result = try w.mergeIntoBranches(t.slug, targets: ["rebocs_api": "develop", "rebocs-admin": "develop"])
+        XCTAssertEqual(result.results.map(\.situation), ["mesclado", "mesclado"])
+        XCTAssertTrue(Git.refExists("\(remote)/rebocs-admin.git", "refs/heads/develop"))
+        let apiLog = try Git.run("\(remote)/rebocs_api.git", "log", "--format=%s", "develop")
+        XCTAssertTrue(apiLog.contains("feature") && apiLog.contains("outro") && apiLog.contains("Merge branch"))
+        let adminLog = try Git.run("\(remote)/rebocs-admin.git", "log", "--format=%s", "develop")
+        XCTAssertFalse(adminLog.contains("Merge branch"))
+        XCTAssertTrue(adminLog.contains("feature"))
+        XCTAssertThrowsError(try w.mergeIntoBranches(t.slug, targets: ["rebocs_api": "inexistente"], only: ["rebocs_api"]))
+    }
 }
 
 final class ProviderTests: XCTestCase {

@@ -24,6 +24,8 @@ extension CLI {
         "descer": Command(summary: "derruba os serviços da trama", usage: "trama descer [--trama x] [--repo nome] [--servico nome]", valueFlags: ["trama", "repo", "servico"], run: cmdDown),
         "pr": Command(summary: "abre os PRs de todos os repositórios da trama, ligados entre si (GitHub com gh, Azure DevOps com az, GitLab com glab; outros pelo link)",
                       usage: "trama pr [--rascunho] [--base develop | --base api=staging,admin=develop] [--repo a,b] [--simular] [--trama x]\n  trama pr ls [--trama x]", valueFlags: ["trama", "base", "repo"], run: cmdPullRequests),
+        "mesclar": Command(summary: "mescla a branch da trama direto em branches do remoto (sem PR), na ordem de merge",
+                          usage: "trama mesclar --base develop | --base api=staging,admin=develop [--repo a,b] [--simular] [--trama x]", valueFlags: ["trama", "base", "repo"], run: cmdMergeIntoBranches),
         "merge": Command(summary: "traz os commits de uma trama para outra, nos repositórios que as duas têm",
                          usage: "trama merge <origem> [--para destino] [--repo a,b] [--permitir-conflito]", valueFlags: ["para", "repo"], run: cmdMerge),
         "preparar": Command(summary: "refaz o preparo dos worktrees (copia arquivos e roda a receita do repositório)", usage: "trama preparar <trama> [repo]", valueFlags: [], run: cmdPrepare),
@@ -385,6 +387,37 @@ extension CLI {
         for p in result.prs { c.ok("\(p.repo): \(p.url)") }
         for m in result.manual {
             c.line("  \(m.repo): branch enviada · abra o PR em \(m.target) pelo link (\(m.provider.title)): \(m.url ?? "sem endereço para este remoto")")
+        }
+        c.warnings(result.warnings)
+    }
+
+    static func cmdMergeIntoBranches(_ c: Context, _ a: Arguments) throws {
+        let w = try c.open()
+        let trama = try c.targetTrama(w, a.value("trama")).trama
+        var targets: [String: String] = [:]
+        if let spec = a.value("base") {
+            targets = try w.parsePullRequestTargets(spec, for: trama)
+        }
+        var only: Set<String>?
+        if let list = a.value("repo") {
+            only = Set(try list.split(separator: ",").map { try w.repo(String($0)).name })
+        }
+        if a.has("simular") || a.has("dry-run") {
+            _ = try w.remoteBranchCatalog(trama.slug, fetch: true)
+            let plan = try w.pullRequestPlan(trama.slug, targets: targets)
+                .filter { only?.contains($0.repo) ?? true }
+            if c.json { return try c.emitJSON(plan) }
+            var rows = [["ORDEM", "REPO", "DESTINO", "COMMITS", "CONFLITO"]]
+            for p in plan {
+                let conflict = p.conflictFiles.map { $0.isEmpty ? "nenhum" : "\($0.count) \(plural($0.count, "arquivo", "arquivos"))" } ?? "—"
+                rows.append(["\(p.order)", p.repo, p.target, "↑\(p.ahead)", conflict])
+            }
+            return c.text(table(rows))
+        }
+        let result = try w.mergeIntoBranches(trama.slug, targets: targets, only: only)
+        if c.json { return try c.emitJSON(result.results) }
+        for r in result.results {
+            c.line("  \(r.repo): \(r.situation)" + (r.detail.map { " · " + $0 } ?? ""))
         }
         c.warnings(result.warnings)
     }

@@ -152,6 +152,28 @@ final class AppModel: ObservableObject {
         }
     }
 
+    @discardableResult
+    func mergeIntoBranches(_ slug: String, targets: [String: String], only: Set<String>) async -> Bool {
+        busy = true
+        defer { busy = false }
+        do {
+            let result = try await Core.run { try $0.mergeIntoBranches(slug, targets: targets, only: only) }
+            let failed = result.results.filter { $0.situation == "erro" }
+            let merged = result.results.count - failed.count
+            if merged > 0 {
+                showNotice("Mesclado direto em \(merged) \(plural(merged, "repositório", "repositórios"))")
+            }
+            let problems = failed.map { "\($0.repo): \($0.detail ?? "falhou")" } + result.warnings.map { w in w.repo.map { "\($0): \(w.message)" } ?? w.message }
+            if !problems.isEmpty { showError(problems.joined(separator: "\n")) }
+            await refresh()
+            await refreshPullRequests()
+            return failed.isEmpty
+        } catch {
+            showError(errorMessage(error))
+            return false
+        }
+    }
+
     func fetchRemotes() async {
         guard !needsSetup else { return }
         _ = try? await Core.run { $0.fetchAll() }

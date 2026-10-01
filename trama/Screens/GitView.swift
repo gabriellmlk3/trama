@@ -186,7 +186,7 @@ struct GitView: View {
 
     @ViewBuilder var detail: some View {
         if let name = currentRepo, let status = trama.status(for: name), let repo = model.repo(name) {
-            ScrollView {
+            BlurScrollView {
                 GitRepoDetail(
                     trama: trama,
                     repo: repo,
@@ -281,7 +281,7 @@ struct RepoList: View {
             .scrollIndicators(.never)
         } else {
             VStack(alignment: .leading, spacing: 0) {
-                ScrollView {
+                BlurScrollView {
                     VStack(alignment: .leading, spacing: 10) {
                         CollapsibleSection(
                             title: "Nesta trama · \(trama.status.count)",
