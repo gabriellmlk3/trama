@@ -122,19 +122,33 @@ final class AppModel: ObservableObject {
         }
     }
 
-    func openPullRequests(_ slug: String, draft: Bool) async {
+    @discardableResult
+    func openPullRequests(_ slug: String, draft: Bool, targets: [String: String] = [:], only: Set<String>? = nil) async -> Bool {
         busy = true
         defer { busy = false }
+        let hadPullRequests = !(state?.tramas.first(where: { $0.slug == slug })?.trama.prs.isEmpty ?? true)
         do {
-            let result = try await Core.run { try $0.openPullRequests(slug, draft: draft) }
-            showNotice("PRs abertos")
+            let result = try await Core.run { try $0.openPullRequests(slug, draft: draft, targets: targets, only: only) }
+            for link in result.manual {
+                if let text = link.url, let url = URL(string: text) { NSWorkspace.shared.open(url) }
+            }
+            let inBrowser = result.manual.count
+            if inBrowser == 0 {
+                showNotice(hadPullRequests ? "PRs atualizados" : "PRs abertos")
+            } else if result.opened.isEmpty {
+                showNotice("Branches enviadas · \(inBrowser) \(plural(inBrowser, "PR", "PRs")) para abrir no navegador")
+            } else {
+                showNotice((hadPullRequests ? "PRs atualizados" : "PRs abertos") + " · \(inBrowser) no navegador")
+            }
             if !result.warnings.isEmpty {
                 showError(result.warnings.map { w in w.repo.map { "\($0): \(w.message)" } ?? w.message }.joined(separator: "\n"))
             }
             await refresh()
             await refreshPullRequests()
+            return true
         } catch {
             showError(errorMessage(error))
+            return false
         }
     }
 
@@ -494,6 +508,10 @@ final class AppModel: ObservableObject {
 
     func setMergeRank(_ name: String, _ rank: Int) async {
         await perform { _ = try $0.setMergeRank(name, rank) }
+    }
+
+    func setProvider(_ name: String, _ kind: ProviderKind?) async {
+        await perform { _ = try $0.setProvider(name, kind) }
     }
 
     func startServices(_ slug: String, repo: String) async {

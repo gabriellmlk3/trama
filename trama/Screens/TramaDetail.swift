@@ -57,7 +57,7 @@ struct TramaHeader: View {
     @EnvironmentObject var model: AppModel
     let trama: LiveTrama
     @State private var confirmingArchive = false
-    @State private var confirmingPRs = false
+    @State private var choosingPullRequests = false
     @State private var mergeSource: LiveTrama?
 
     var base: String {
@@ -157,12 +157,12 @@ struct TramaHeader: View {
                     }
                     .buttonStyle(GhostButton())
                     Button {
-                        confirmingPRs = true
+                        choosingPullRequests = true
                     } label: {
                         Label(trama.trama.prs.isEmpty ? "Abrir PRs" : "Atualizar PRs", systemImage: "arrow.triangle.pull")
                     }
                     .buttonStyle(GhostButton())
-                    .help("Envia as branches e abre (ou atualiza) um PR por repositório, ligados entre si")
+                    .help("Escolhe a branch de destino de cada repositório, envia as branches e abre (ou atualiza) os PRs, ligados entre si")
                     Button {
                         model.openClaudeInAll(trama)
                     } label: {
@@ -191,12 +191,8 @@ struct TramaHeader: View {
                 Text("Faz merge da branch \(source.branch) em \(trama.branch), nos repositórios que as duas têm. Se algum worktree daqui tiver mudanças não commitadas ou o merge previr conflito, “Fazer merge” não mescla nada; “Mesclar e resolver conflitos” deixa o merge em andamento na aba Git.")
             }
         }
-        .confirmationDialog("Abrir PRs de “\(trama.title)”?", isPresented: $confirmingPRs) {
-            Button("Abrir PRs") { Task { await model.openPullRequests(trama.slug, draft: false) } }
-            Button("Abrir como rascunho") { Task { await model.openPullRequests(trama.slug, draft: true) } }
-            Button("Cancelar", role: .cancel) {}
-        } message: {
-            Text("Envia a branch \(trama.branch) de cada repositório com commits novos para o remoto e abre um PR em cada um, com links cruzados.")
+        .sheet(isPresented: $choosingPullRequests) {
+            PullRequestSheet(trama: trama)
         }
         .alert("Arquivar “\(trama.title)”?", isPresented: $confirmingArchive) {
             Button("Arquivar", role: .destructive) { Task { await model.archive(trama.slug) } }

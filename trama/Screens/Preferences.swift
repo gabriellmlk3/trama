@@ -123,7 +123,7 @@ struct PreferencesView: View {
                     } label: {
                         VStack(alignment: .leading, spacing: 2) {
                             Text(r.name)
-                            Text("apelido \(r.alias) · base \(r.base ?? "main")" + (r.recipe.isEmpty && r.services.isEmpty ? "" : " · preparo configurado"))
+                            Text("apelido \(r.alias) · base \(r.base ?? "main")" + (r.provider.map { " · \($0.title)" } ?? "") + (r.recipe.isEmpty && r.services.isEmpty ? "" : " · preparo configurado"))
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
@@ -211,6 +211,7 @@ private struct RecipeEditor: View {
     @State private var services = ""
     @State private var mergeRank = "0"
     @State private var editor = ""
+    @State private var provider = ""
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -268,6 +269,21 @@ private struct RecipeEditor: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 8) {
+                    Text("Provedor dos PRs")
+                        .font(.subheadline)
+                    Picker("", selection: $provider) {
+                        Text("Automático (pelo remoto)").tag("")
+                        ForEach(ProviderKind.allCases, id: \.self) { Text($0.title).tag($0.rawValue) }
+                    }
+                    .labelsHidden()
+                    .frame(width: 210)
+                }
+                Text("GitHub usa o gh, Azure DevOps o az e GitLab o glab. Nos outros, a branch sobe e o PR abre pelo link, no navegador.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
             HStack {
                 Spacer()
                 Button("Cancelar") { dismiss() }
@@ -278,7 +294,9 @@ private struct RecipeEditor: View {
                     let parsed = parseServices(services)
                     let rank = Int(mergeRank.trimmingCharacters(in: .whitespaces)) ?? 0
                     let app = editor
+                    let kind = ProviderKind(rawValue: provider)
                     Task {
+                        await model.setProvider(repo.name, kind)
                         await model.setEditor(repo.name, app)
                         await model.setMergeRank(repo.name, rank)
                         await model.setRecipe(repo.name, copy: c, run: r)
@@ -296,6 +314,7 @@ private struct RecipeEditor: View {
             run = repo.run.joined(separator: "\n")
             mergeRank = String(repo.mergeRank)
             editor = repo.editor ?? ""
+            provider = repo.provider?.rawValue ?? ""
             services = repo.services.map { "\($0.name) \($0.port) \($0.command)" }.joined(separator: "\n")
         }
     }

@@ -18,63 +18,6 @@ public struct PullRequestInfo: Codable, Hashable, Identifiable, Sendable {
     public var id: String { repo }
 }
 
-enum GH {
-    static var executable: String? {
-        if let v = ProcessInfo.processInfo.environment["TRAMA_GH"], !v.isEmpty { return v }
-        return ["/opt/homebrew/bin/gh", "/usr/local/bin/gh", "/usr/bin/gh"].first { FileManager.default.isExecutableFile(atPath: $0) }
-    }
-
-    static func execute(_ dir: String, _ args: [String], timeout: TimeInterval = 60) -> GitResult {
-        guard let exe = executable else {
-            return GitResult(output: "", error: "não encontrei o `gh` · instale com `brew install gh` e rode `gh auth login`", code: -1)
-        }
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: exe)
-        process.arguments = args
-        process.currentDirectoryURL = URL(fileURLWithPath: dir)
-        var env = ProcessInfo.processInfo.environment
-        env["GH_PROMPT_DISABLED"] = "1"
-        env["NO_COLOR"] = "1"
-        env["GH_NO_UPDATE_NOTIFIER"] = "1"
-        process.environment = env
-        let output = Pipe()
-        let error = Pipe()
-        process.standardOutput = output
-        process.standardError = error
-        process.standardInput = FileHandle.nullDevice
-        do {
-            try process.run()
-        } catch {
-            return GitResult(output: "", error: "não consegui executar o gh: \(error.localizedDescription)", code: -1)
-        }
-        let item = DispatchWorkItem { if process.isRunning { process.terminate() } }
-        DispatchQueue.global().asyncAfter(deadline: .now() + timeout, execute: item)
-        let errorBox = Box()
-        let group = DispatchGroup()
-        group.enter()
-        DispatchQueue.global(qos: .userInitiated).async {
-            errorBox.data = error.fileHandleForReading.readDataToEndOfFile()
-            group.leave()
-        }
-        let data = output.fileHandleForReading.readDataToEndOfFile()
-        group.wait()
-        process.waitUntilExit()
-        item.cancel()
-        var text = String(decoding: data, as: UTF8.self)
-        while text.hasSuffix("\n") { text.removeLast() }
-        return GitResult(output: text, error: String(decoding: errorBox.data, as: UTF8.self), code: process.terminationStatus)
-    }
-
-    static func run(_ dir: String, _ args: [String]) throws -> String {
-        let r = execute(dir, args)
-        guard r.code == 0 else {
-            let message = r.error.trimmingCharacters(in: .whitespacesAndNewlines)
-            throw TramaError("gh \(args.prefix(2).joined(separator: " ")): \(message.isEmpty ? "código \(r.code)" : message)")
-        }
-        return r.output
-    }
-}
-
 func ciState(_ rollup: [[String: Any]]) -> String {
     guard !rollup.isEmpty else { return CIState.none }
     let bad: Set<String> = ["FAILURE", "TIMED_OUT", "CANCELLED", "STARTUP_FAILURE", "ACTION_REQUIRED", "ERROR"]
@@ -90,6 +33,24 @@ func ciState(_ rollup: [[String: Any]]) -> String {
     return pending ? CIState.pending : CIState.success
 }
 
+public struct ManualPullRequest: Codable, Hashable, Identifiable, Sendable {
+    public var repo: String
+    public var provider: ProviderKind
+    public var target: String
+    public var url: String?
+
+    public var id: String { repo }
+}
+
+private struct OpenedPullRequest {
+    let repo: RepoConfig
+    let url: String
+    let dir: String
+    let target: String
+    let retargetedFrom: String?
+    let provider: any PullRequestProvider
+}
+
 extension Workspace {
     public func mergeOrdered(_ names: [String]) -> [RepoConfig] {
         names.compactMap { try? repo($0) }.sorted { ($0.mergeRank, $0.name) < ($1.mergeRank, $1.name) }
@@ -103,38 +64,42 @@ extension Workspace {
         return r
     }
 
-    func pullRequestBody(_ t: Trama, capsule: TramaCapsule, links: [(repo: String, url: String)], current: String) -> String {
-        var b = ""
+    func pullRequestBody(_ t: Trama, capsule: TramaCapsule, links: [(repo: String, url: String)], current: String, limit: Int = Int.max) -> String {
+        var head = ""
         let goal = capsule.goal.trimmingCharacters(in: .whitespacesAndNewlines)
-        b += "## \(t.title)\n\n"
-        if !goal.isEmpty { b += "**Objetivo.** \(goal)\n\n" }
-        if let task = t.task, !task.isEmpty { b += "**Tarefa.** \(task)\n\n" }
+        head += "## \(t.title)\n\n"
+        if !goal.isEmpty { head += "**Objetivo.** \(goal)\n\n" }
+        if let task = t.task, !task.isEmpty { head += "**Tarefa.** \(task)\n\n" }
         if !capsule.decisions.isEmpty {
-            b += "### Decisões\n\n"
-            for d in capsule.decisions { b += "- \(d.text)\n" }
-            b += "\n"
+            head += "### Decisões\n\n"
+            for d in capsule.decisions { head += "- \(d.text)\n" }
+            head += "\n"
         }
+        var tail = ""
         if links.count > 1 {
-            b += "---\n\n### PRs desta trama\n\nMerge nesta ordem:\n\n"
+            tail += "---\n\n### PRs desta trama\n\nMerge nesta ordem:\n\n"
             for (i, l) in links.enumerated() {
-                b += "\(i + 1). \(l.url)" + (l.repo == current ? " ← este PR" : "") + "\n"
+                tail += "\(i + 1). \(l.url)" + (l.repo == current ? " ← este PR" : "") + "\n"
             }
         }
-        return b
+        guard head.count + tail.count > limit else { return head + tail }
+        let room = max(limit - tail.count - 3, 0)
+        return String(head.prefix(room)).trimmingCharacters(in: .whitespacesAndNewlines) + "…\n\n" + tail
     }
 
     @discardableResult
-    public func openPullRequests(_ slug: String, draft: Bool = false) throws -> (trama: Trama, prs: [PullRequestInfo], warnings: [Warning]) {
+    public func openPullRequests(_ slug: String, draft: Bool = false, targets: [String: String] = [:], only: Set<String>? = nil) throws -> (trama: Trama, prs: [PullRequestInfo], warnings: [Warning], manual: [ManualPullRequest], opened: [String]) {
         let t = try trama(slug)
         guard !t.isArchived else { throw TramaError("essa trama está arquivada") }
-        guard GH.executable != nil else {
-            throw TramaError("não encontrei o `gh` · instale com `brew install gh` e rode `gh auth login`")
-        }
         let capsule = (try? readCapsule(t.slug)) ?? TramaCapsule(trama: t.slug, path: "", exists: false)
         var warnings: [Warning] = []
-        var opened: [(repo: String, url: String, dir: String)] = []
+        var opened: [OpenedPullRequest] = []
+        var manual: [ManualPullRequest] = []
+        var chosen: [(repo: RepoConfig, target: String)] = []
+        var linked: [(repo: String, url: String)] = []
         var known = t.prs
         for r in mergeOrdered(t.repos) {
+            if let only, !only.contains(r.name) { continue }
             let wt = worktreePath(t.slug, r.name)
             guard Paths.isDirectory(wt) else {
                 warnings.append(Warning(repo: r.name, message: "worktree não encontrado"))
@@ -144,68 +109,109 @@ extension Workspace {
                 warnings.append(Warning(repo: r.name, message: "não tem remoto origin"))
                 continue
             }
-            let base = base(for: t, r)
-            let ahead = (try? Git.aheadBehind(wt, Git.baseRef(wt, base)).ahead) ?? 0
+            let target = targets[r.name] ?? prTarget(for: t, r)
+            guard Git.ensureRemoteBranch(wt, target) else {
+                warnings.append(Warning(repo: r.name, message: "o destino \(target) não existe no remoto · não abri PR"))
+                continue
+            }
+            let ahead = (try? Git.aheadBehind(wt, Git.baseRef(wt, target)).ahead) ?? 0
             guard ahead > 0 else {
-                warnings.append(Warning(repo: r.name, message: "sem commits à frente de \(base) · não abri PR"))
+                warnings.append(Warning(repo: r.name, message: "sem commits à frente de \(target) · não abri PR"))
                 continue
             }
             if let lines = try? Git.statusLines(wt), !lines.isEmpty {
                 warnings.append(Warning(repo: r.name, message: "\(lines.count) \(plural(lines.count, "arquivo", "arquivos")) não commitado(s) ficaram de fora do PR"))
             }
+            let host = self.host(for: r, dir: wt)
             do {
+                guard let provider = host.automatic else {
+                    try Git.run(wt, "push", "-u", "origin", t.branch)
+                    if let tool = host.missingTool {
+                        warnings.append(Warning(repo: r.name, message: "\(tool.missingMessage) · abra o PR pelo link"))
+                    }
+                    manual.append(ManualPullRequest(repo: r.name, provider: host.kind, target: target, url: host.newPullRequestURL(branch: t.branch, target: target)))
+                    chosen.append((r, target))
+                    continue
+                }
+                let knownURL = known[r.name]
+                let current = provider.existing(wt, knownURL ?? t.branch)
+                if let current, current.state != "open" {
+                    known[r.name] = current.url
+                    linked.append((r.name, current.url))
+                    let reason = current.state == "merged" ? "já foi mesclado" : "está fechado"
+                    warnings.append(Warning(repo: r.name, message: "o PR #\(current.number) \(reason) · não mexi nele"))
+                    continue
+                }
                 try Git.run(wt, "push", "-u", "origin", t.branch)
-                var url = known[r.name]
-                if url == nil {
-                    let r1 = GH.execute(wt, ["pr", "view", t.branch, "--json", "url", "--jq", ".url"])
-                    if r1.code == 0, !r1.output.isEmpty { url = r1.output }
+                var retargetedFrom: String?
+                if let current, !current.base.isEmpty, current.base != target {
+                    try provider.retarget(wt, url: current.url, base: target)
+                    retargetedFrom = current.base
                 }
-                if url == nil {
-                    var args = ["pr", "create", "--base", base, "--head", t.branch, "--title", t.title,
-                                "--body", pullRequestBody(t, capsule: capsule, links: [], current: r.name)]
-                    if draft { args.append("--draft") }
-                    let out = try GH.run(wt, args)
-                    url = out.split(separator: "\n").map(String.init).last { $0.hasPrefix("http") }
+                let url: String
+                if let existingURL = knownURL ?? current?.url {
+                    url = existingURL
+                } else {
+                    let body = pullRequestBody(t, capsule: capsule, links: [], current: r.name, limit: provider.bodyLimit)
+                    url = try provider.create(wt, head: t.branch, base: target, title: t.title, body: body, draft: draft)
                 }
-                guard let url else { throw TramaError("o gh não devolveu o endereço do PR") }
                 known[r.name] = url
-                opened.append((r.name, url, wt))
+                linked.append((r.name, url))
+                opened.append(OpenedPullRequest(repo: r, url: url, dir: wt, target: target, retargetedFrom: retargetedFrom, provider: provider))
+                chosen.append((r, target))
             } catch {
                 warnings.append(Warning(repo: r.name, message: errorMessage(error)))
             }
         }
-        guard !opened.isEmpty else {
+        guard !opened.isEmpty || !manual.isEmpty else {
             throw TramaError(warnings.isEmpty ? "nenhum repositório com PR para abrir" : warnings.map { ($0.repo.map { "\($0): " } ?? "") + $0.message }.joined(separator: "\n"))
         }
-        let links = opened.map { (repo: $0.repo, url: $0.url) }
+        let links = linked
         for o in opened {
-            let body = pullRequestBody(t, capsule: capsule, links: links, current: o.repo)
+            let body = pullRequestBody(t, capsule: capsule, links: links, current: o.repo.name, limit: o.provider.bodyLimit)
             do {
-                try GH.run(o.dir, ["pr", "edit", o.url, "--body", body])
+                try o.provider.updateBody(o.dir, url: o.url, body: body)
             } catch {
-                warnings.append(Warning(repo: o.repo, message: "não consegui ligar os PRs: \(errorMessage(error))"))
+                warnings.append(Warning(repo: o.repo.name, message: "não consegui ligar os PRs: \(errorMessage(error))"))
             }
         }
-        let saved = known
-        let updated = try updateTrama(t.slug) { $0.prs = saved }
-        try? addJournal(updated.slug, "PRs: " + opened.map { "\($0.repo) \($0.url)" }.joined(separator: " · "))
-        return (updated, pullRequestInfos(updated), warnings)
+        var bases = t.prBases
+        for c in chosen {
+            if c.target == base(for: t, c.repo) {
+                bases.removeValue(forKey: c.repo.name)
+            } else {
+                bases[c.repo.name] = c.target
+            }
+        }
+        let savedPRs = known
+        let savedBases = bases
+        let updated = try updateTrama(t.slug) {
+            $0.prs = savedPRs
+            $0.prBases = savedBases
+        }
+        var lines = opened.map { o -> String in
+            var line = "\(o.repo.name) \(o.url) → \(o.target)"
+            if let from = o.retargetedFrom { line += " (antes \(from))" }
+            return line
+        }
+        lines += manual.map { "\($0.repo) → \($0.target) (\($0.provider.title), pelo navegador)" }
+        try? addJournal(updated.slug, "PRs: " + lines.joined(separator: " · "))
+        return (updated, pullRequestInfos(updated), warnings, manual, opened.map { $0.repo.name })
     }
 
     public func pullRequestInfos(_ t: Trama) -> [PullRequestInfo] {
-        let entries = mergeOrdered(t.repos).compactMap { r in t.prs[r.name].map { (r.name, $0) } }
+        let entries = mergeOrdered(t.repos).compactMap { r in t.prs[r.name].map { (r, $0) } }
         var out = [PullRequestInfo?](repeating: nil, count: entries.count)
         let lock = NSLock()
         DispatchQueue.concurrentPerform(iterations: entries.count) { i in
-            let (name, url) = entries[i]
-            var info = PullRequestInfo(repo: name, url: url, number: 0, state: "?", draft: false, ci: CIState.none)
-            let r = GH.execute(root, ["pr", "view", url, "--json", "number,state,isDraft,statusCheckRollup"], timeout: 30)
-            if r.code == 0,
-               let json = try? JSONSerialization.jsonObject(with: Data(r.output.utf8)) as? [String: Any] {
-                info.number = json["number"] as? Int ?? 0
-                info.state = (json["state"] as? String ?? "?").lowercased()
-                info.draft = json["isDraft"] as? Bool ?? false
-                info.ci = ciState(json["statusCheckRollup"] as? [[String: Any]] ?? [])
+            let (r, url) = entries[i]
+            var info = PullRequestInfo(repo: r.name, url: url, number: 0, state: "?", draft: false, ci: CIState.none)
+            let dir = Paths.isDirectory(r.path) ? r.path : root
+            if let provider = host(for: r, dir: dir).automatic, let status = provider.status(dir, url: url) {
+                info.number = status.number
+                info.state = status.state
+                info.draft = status.draft
+                info.ci = status.ci
             }
             lock.lock()
             out[i] = info

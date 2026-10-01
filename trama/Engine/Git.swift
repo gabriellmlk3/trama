@@ -104,6 +104,12 @@ enum Git {
         return out.split(separator: "\n").contains { $0.trimmingCharacters(in: .whitespaces) == "origin" }
     }
 
+    static func remoteURL(_ dir: String) -> String? {
+        let r = execute(dir, ["config", "--get", "remote.origin.url"])
+        let url = r.output.trimmingCharacters(in: .whitespacesAndNewlines)
+        return r.code == 0 && !url.isEmpty ? url : nil
+    }
+
     static func baseRef(_ dir: String, _ base: String) -> String {
         refExists(dir, "refs/remotes/origin/" + base) ? "origin/" + base : base
     }
@@ -173,6 +179,42 @@ enum Git {
         case 1: return "conflito"
         default: return "desconhecido"
         }
+    }
+
+    static func predictedConflictFiles(_ dir: String, _ ref: String) -> [String]? {
+        let r = execute(dir, ["merge-tree", "--write-tree", "--name-only", "HEAD", ref], timeout: 20)
+        switch r.code {
+        case 0:
+            return []
+        case 1:
+            var files: [String] = []
+            for line in r.output.components(separatedBy: "\n").dropFirst() {
+                if line.isEmpty { break }
+                files.append(line)
+            }
+            return files.isEmpty ? nil : files
+        default:
+            return nil
+        }
+    }
+
+    static func remoteBranches(_ dir: String) -> [String] {
+        let prefix = "refs/remotes/origin/"
+        guard let out = try? run(dir, "for-each-ref", "--format=%(refname)", "refs/remotes/origin") else { return [] }
+        return out.split(separator: "\n").compactMap { line in
+            guard line.hasPrefix(prefix) else { return nil }
+            let name = String(line.dropFirst(prefix.count))
+            return name == "HEAD" ? nil : name
+        }
+    }
+
+    static func ensureRemoteBranch(_ dir: String, _ branch: String) -> Bool {
+        if refExists(dir, "refs/remotes/origin/" + branch) { return true }
+        guard execute(dir, ["ls-remote", "--exit-code", "--heads", "origin", "refs/heads/" + branch], timeout: 30).code == 0 else {
+            return false
+        }
+        _ = execute(dir, ["fetch", "--quiet", "origin", branch], timeout: 45)
+        return true
     }
 
     struct WorktreeInfo {
