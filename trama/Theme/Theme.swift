@@ -196,21 +196,11 @@ struct TramaLogo: View {
     var size: CGFloat = 22
 
     var body: some View {
-        Canvas { ctx, canvasSize in
-            let s = canvasSize.width / 24
-            var h = Path()
-            h.move(to: CGPoint(x: 3 * s, y: 7 * s)); h.addLine(to: CGPoint(x: 10.2 * s, y: 7 * s))
-            h.move(to: CGPoint(x: 13.8 * s, y: 7 * s)); h.addLine(to: CGPoint(x: 21 * s, y: 7 * s))
-            h.move(to: CGPoint(x: 3 * s, y: 12 * s)); h.addLine(to: CGPoint(x: 21 * s, y: 12 * s))
-            h.move(to: CGPoint(x: 3 * s, y: 17 * s)); h.addLine(to: CGPoint(x: 10.2 * s, y: 17 * s))
-            h.move(to: CGPoint(x: 13.8 * s, y: 17 * s)); h.addLine(to: CGPoint(x: 21 * s, y: 17 * s))
-            ctx.stroke(h, with: .color(Color(hex: 0x4A4E57)), style: StrokeStyle(lineWidth: 1.6 * s, lineCap: .round))
-            var v = Path()
-            v.move(to: CGPoint(x: 12 * s, y: 3 * s)); v.addLine(to: CGPoint(x: 12 * s, y: 9.3 * s))
-            v.move(to: CGPoint(x: 12 * s, y: 14.7 * s)); v.addLine(to: CGPoint(x: 12 * s, y: 21 * s))
-            ctx.stroke(v, with: .color(Theme.ember), style: StrokeStyle(lineWidth: 2.2 * s, lineCap: .round))
-        }
-        .frame(width: size, height: size)
+        Image("TramaMark")
+            .resizable()
+            .interpolation(.high)
+            .frame(width: size, height: size)
+            .accessibilityHidden(true)
     }
 }
 
