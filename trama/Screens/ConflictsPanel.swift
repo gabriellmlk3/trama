@@ -16,6 +16,7 @@ struct ConflictsPanel: View {
     @State private var conflicts: ConflictState?
     @State private var version = 0
     @State private var resolving: ConflictFile?
+    @State private var advance = false
     @State private var confirmingAbort = false
 
     var body: some View {
@@ -28,9 +29,14 @@ struct ConflictsPanel: View {
             let repo = repo
             let worktree = worktree
             conflicts = try? await Core.run { try $0.conflictState(repo: repo, worktree: worktree) }
+            if advance {
+                advance = false
+                resolving = conflicts?.files.first(where: \.canMerge)
+            }
         }
         .sheet(item: $resolving) { file in
-            ConflictResolver(repo: repo, worktree: worktree, file: file) {
+            ConflictResolver(repo: repo, worktree: worktree, file: file, oursName: conflicts?.current ?? "", theirsName: conflicts?.incoming ?? "") {
+                advance = true
                 version += 1
                 onChange()
             }
@@ -124,58 +130,45 @@ struct ConflictsPanel: View {
     }
 }
 
-private struct HunkEditing: Equatable {
-    var id: Int
-    var text: String
-}
-
 struct ConflictResolver: View {
     @EnvironmentObject var model: AppModel
     @Environment(\.dismiss) private var dismiss
     let repo: String
     let worktree: String
     let file: ConflictFile
+    let oursName: String
+    let theirsName: String
     let onApplied: () -> Void
 
     @State private var document: ConflictDocument?
     @State private var loadError: String?
-    @State private var resolutions: [Int: ConflictResolution] = [:]
-    @State private var editing: HunkEditing?
-
-    var hunks: [ConflictHunk] { document?.hunks ?? [] }
-    var pending: Int { hunks.filter { resolutions[$0.id] == nil }.count }
 
     var body: some View {
-        VStack(spacing: 0) {
-            header
-            Divider().overlay(Theme.line)
+        Group {
             if let document {
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 10) {
-                        ForEach(document.segments) { segment in
-                            switch segment {
-                            case .context(_, let lines):
-                                contextBlock(lines)
-                            case .hunk(let h):
-                                hunkRow(h, document)
-                            }
+                ConflictMergeView(document: document, file: file, oursName: oursName, theirsName: theirsName, busy: model.busy, onCancel: { dismiss() }) { content in
+                    Task {
+                        if await model.saveResolution(repo, worktree: worktree, file: file.path, content: content) {
+                            onApplied()
+                            dismiss()
                         }
                     }
-                    .padding(16)
                 }
             } else if let loadError {
-                Text(loadError)
-                    .font(.system(size: 12.5))
-                    .foregroundStyle(Theme.waitText)
-                    .padding(24)
-                Spacer()
+                VStack(alignment: .leading, spacing: 14) {
+                    Text(file.path).font(Theme.mono(13, weight: .medium))
+                    Text(loadError).font(.system(size: 12.5)).foregroundStyle(Theme.waitText)
+                    Button("Fechar") { dismiss() }.buttonStyle(GhostButton(compact: true))
+                }
+                .padding(24)
+                .frame(minWidth: 520, minHeight: 180, alignment: .topLeading)
+                .background(Theme.background)
             } else {
-                ProgressView().controlSize(.small).padding(24)
-                Spacer()
+                ProgressView().controlSize(.small)
+                    .frame(minWidth: 520, minHeight: 180)
+                    .background(Theme.background)
             }
         }
-        .frame(minWidth: 1000, minHeight: 640)
-        .background(Theme.background)
         .task {
             let repo = repo
             let worktree = worktree
@@ -186,169 +179,5 @@ struct ConflictResolver: View {
                 loadError = errorMessage(error)
             }
         }
-    }
-
-    var header: some View {
-        HStack(spacing: 12) {
-            VStack(alignment: .leading, spacing: 3) {
-                Text(file.path)
-                    .font(Theme.mono(13, weight: .medium))
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                Text(hunks.isEmpty ? "lendo…" : (pending == 0 ? "todos os trechos resolvidos" : "\(pending) de \(hunks.count) \(plural(hunks.count, "trecho", "trechos")) por resolver"))
-                    .font(.system(size: 11.5))
-                    .foregroundStyle(pending == 0 ? Theme.okText : Theme.waitText)
-            }
-            Spacer(minLength: 8)
-            Button("Todas minhas") { resolveAll(.ours) }
-                .buttonStyle(GhostButton(compact: true))
-            Button("Todas deles") { resolveAll(.theirs) }
-                .buttonStyle(GhostButton(compact: true))
-            Button("Cancelar") { dismiss() }
-                .buttonStyle(GhostButton(compact: true))
-                .keyboardShortcut(.cancelAction)
-            Button("Aplicar") { apply() }
-                .buttonStyle(EmberButton(compact: true))
-                .disabled(document == nil || pending > 0 || model.busy)
-                .opacity(document != nil && pending == 0 ? 1 : 0.4)
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 12)
-    }
-
-    func resolveAll(_ r: ConflictResolution) {
-        for h in hunks { resolutions[h.id] = r }
-        editing = nil
-    }
-
-    func apply() {
-        guard let document, let content = try? document.render(resolutions) else { return }
-        Task {
-            if await model.saveResolution(repo, worktree: worktree, file: file.path, content: content) {
-                onApplied()
-                dismiss()
-            }
-        }
-    }
-
-    func codeText(_ lines: [String]) -> some View {
-        Group {
-            if lines.isEmpty {
-                Text("(vazio)").italic().foregroundStyle(Theme.faded)
-            } else {
-                Text(lines.joined(separator: "\n")).foregroundStyle(Theme.text2)
-            }
-        }
-        .font(Theme.mono(11.5))
-        .textSelection(.enabled)
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    func contextBlock(_ lines: [String]) -> some View {
-        let shown = lines.count > 9 ? Array(lines.prefix(3)) + ["⋯ \(lines.count - 6) linhas iguais ⋯"] + Array(lines.suffix(3)) : lines
-        return codeText(shown)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 6)
-            .opacity(0.75)
-    }
-
-    func column(title: String, tone: Color, text: Color, lines: [String], arrow: String, help: String, action: @escaping () -> Void) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 6) {
-                if arrow == "arrow.right" {
-                    Text(title).font(.system(size: 11.5, weight: .medium)).foregroundStyle(text).lineLimit(1)
-                    Spacer(minLength: 4)
-                    arrowButton(arrow, help: help, action: action)
-                } else {
-                    arrowButton(arrow, help: help, action: action)
-                    Spacer(minLength: 4)
-                    Text(title).font(.system(size: 11.5, weight: .medium)).foregroundStyle(text).lineLimit(1)
-                }
-            }
-            codeText(lines)
-        }
-        .padding(10)
-        .background(RoundedRectangle(cornerRadius: 9).fill(tone.opacity(0.08)))
-        .overlay(RoundedRectangle(cornerRadius: 9).stroke(tone.opacity(0.35), lineWidth: 1))
-    }
-
-    func arrowButton(_ symbol: String, help: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Image(systemName: symbol)
-        }
-        .buttonStyle(IconButton(size: 24))
-        .help(help)
-        .accessibilityLabel(help)
-    }
-
-    func hunkRow(_ h: ConflictHunk, _ doc: ConflictDocument) -> some View {
-        let oursName = doc.oursLabel.isEmpty ? "Minha" : "Minha · \(doc.oursLabel)"
-        let theirsName = doc.theirsLabel.isEmpty ? "Deles" : "Deles · \(doc.theirsLabel)"
-        return HStack(alignment: .top, spacing: 10) {
-            column(title: oursName, tone: Theme.iris, text: Theme.irisText, lines: h.ours, arrow: "arrow.right", help: "Usar a minha versão") {
-                resolutions[h.id] = .ours
-                editing = nil
-            }
-            result(h)
-            column(title: theirsName, tone: Theme.ember, text: Theme.emberLight, lines: h.theirs, arrow: "arrow.left", help: "Usar a versão deles") {
-                resolutions[h.id] = .theirs
-                editing = nil
-            }
-        }
-    }
-
-    func result(_ h: ConflictHunk) -> some View {
-        let resolution = resolutions[h.id]
-        return VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 6) {
-                Text("Resultado").font(.system(size: 11.5, weight: .medium)).foregroundStyle(Theme.text3)
-                Spacer(minLength: 4)
-                if editing?.id != h.id {
-                    Button("Ambas") { resolutions[h.id] = .both }
-                        .buttonStyle(GhostButton(compact: true))
-                        .help("Minha versão seguida da deles")
-                    Button("Editar") {
-                        editing = HunkEditing(id: h.id, text: (resolution?.lines(for: h) ?? h.ours + h.theirs).joined(separator: "\n"))
-                    }
-                    .buttonStyle(GhostButton(compact: true))
-                    if resolution != nil {
-                        Button {
-                            resolutions[h.id] = nil
-                        } label: {
-                            Image(systemName: "arrow.uturn.backward")
-                        }
-                        .buttonStyle(IconButton(size: 28))
-                        .help("Desfazer a escolha")
-                    }
-                }
-            }
-            if let e = editing, e.id == h.id {
-                TextEditor(text: Binding(get: { editing?.text ?? "" }, set: { editing?.text = $0 }))
-                    .font(Theme.mono(11.5))
-                    .scrollContentBackground(.hidden)
-                    .frame(minHeight: 90)
-                    .padding(6)
-                    .background(RoundedRectangle(cornerRadius: 7).fill(Theme.field))
-                HStack {
-                    Spacer()
-                    Button("Cancelar") { editing = nil }
-                        .buttonStyle(GhostButton(compact: true))
-                    Button("Usar este texto") {
-                        resolutions[h.id] = .custom(e.text.isEmpty ? [] : e.text.components(separatedBy: "\n"))
-                        editing = nil
-                    }
-                    .buttonStyle(EmberButton(compact: true))
-                }
-            } else if let resolution {
-                codeText(resolution.lines(for: h))
-            } else {
-                Text("conflito · escolha um lado com as setas")
-                    .font(.system(size: 11.5))
-                    .foregroundStyle(Theme.waitText)
-            }
-        }
-        .padding(10)
-        .background(RoundedRectangle(cornerRadius: 9).fill(Theme.surface))
-        .overlay(RoundedRectangle(cornerRadius: 9).stroke(resolution == nil ? Theme.wait.opacity(0.6) : Theme.ok.opacity(0.4), lineWidth: 1))
     }
 }

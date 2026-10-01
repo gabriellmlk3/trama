@@ -26,6 +26,7 @@ public struct ConflictFile: Hashable, Identifiable, Sendable {
 
 public struct ConflictState: Sendable {
     public var merging: Bool
+    public var current: String
     public var incoming: String
     public var files: [ConflictFile]
 }
@@ -210,7 +211,7 @@ extension Workspace {
 
     public func conflictState(repo key: String, worktree: String) throws -> ConflictState {
         let wt = try conflictWorktree(key, worktree).path
-        return ConflictState(merging: Git.isMerging(wt), incoming: Git.incomingLabel(wt), files: Git.conflictFiles(wt))
+        return ConflictState(merging: Git.isMerging(wt), current: Git.currentBranchName(wt), incoming: Git.incomingLabel(wt), files: Git.conflictFiles(wt))
     }
 
     public func conflictDocument(repo key: String, worktree: String, file: String) throws -> ConflictDocument {
