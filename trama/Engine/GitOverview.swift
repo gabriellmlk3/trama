@@ -23,6 +23,7 @@ public struct WorktreeSummary: Hashable, Identifiable, Sendable {
     public var changed: Int
     public var ahead: Int
     public var isPrimary: Bool
+    public var conflicts = 0
 
     public var id: String { path }
 }
@@ -41,6 +42,8 @@ public struct GitOverview: Sendable {
     public var pushed: Bool
     public var hasOrigin: Bool
     public var worktrees: [WorktreeSummary]
+    public var merging = false
+    public var conflicts = 0
     public var loadedAt: Int64
 
     public var added: Int { changes.reduce(0) { $0 + $1.added } }
@@ -195,6 +198,8 @@ extension Workspace {
             pushed: pushed,
             hasOrigin: origin,
             worktrees: worktreeSummaries(r, base: base),
+            merging: Git.isMerging(wt),
+            conflicts: Git.conflictFiles(wt).count,
             loadedAt: nowUnix()
         )
     }
@@ -215,7 +220,8 @@ extension Workspace {
                 branch: info.branch,
                 changed: changed,
                 ahead: ahead,
-                isPrimary: Paths.real(info.path) == Paths.real(r.path)
+                isPrimary: Paths.real(info.path) == Paths.real(r.path),
+                conflicts: Git.conflictFiles(info.path).count
             )
         }
     }
