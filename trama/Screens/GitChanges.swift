@@ -159,6 +159,11 @@ struct DiffPane: View {
     let lines: [DiffLine]
     let path: String
 
+    var contentWidth: CGFloat {
+        let longest = lines.map { $0.text.count }.max() ?? 0
+        return 34 + 34 + 22 + CGFloat(longest) * 7.4 + 16
+    }
+
     var body: some View {
         GitCard {
             VStack(spacing: 0) {
@@ -215,7 +220,7 @@ struct DiffPane: View {
                                     DiffRow(line: l)
                                 }
                             }
-                            .frame(minWidth: geo.size.width, alignment: .topLeading)
+                            .frame(minWidth: max(geo.size.width, contentWidth), alignment: .topLeading)
                             .padding(.vertical, 4)
                         }
                         .scrollIndicators(.automatic)

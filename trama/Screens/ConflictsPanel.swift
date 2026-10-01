@@ -19,7 +19,7 @@ struct ConflictsPanel: View {
     @State private var confirmingAbort = false
 
     var body: some View {
-        Group {
+        VStack(spacing: 0) {
             if let c = conflicts, c.merging || !c.files.isEmpty {
                 card(c)
             }
