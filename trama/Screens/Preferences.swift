@@ -8,6 +8,7 @@ struct PreferencesView: View {
     @State private var localError: String?
     @State private var defaultBranch = ""
     @AppStorage(ClaudeTarget.storageKey) private var claudeTarget = ClaudeTarget.cli.rawValue
+    @AppStorage(AgentScope.storageKey) private var agentScope = AgentScope.single.rawValue
     @State private var editingRecipe: RepoConfig?
     @AppStorage(NotificationPreference.waiting) private var notifyWaiting = true
     @AppStorage(NotificationPreference.done) private var notifyDone = true
@@ -19,8 +20,12 @@ struct PreferencesView: View {
                     ForEach(ClaudeTarget.allCases) { Text($0.label).tag($0.rawValue) }
                 }
                 .pickerStyle(.segmented)
+                Picker("Ao abrir uma trama", selection: $agentScope) {
+                    ForEach(AgentScope.allCases) { Text($0.label).tag($0.rawValue) }
+                }
+                .pickerStyle(.segmented)
             } footer: {
-                Text("Vale para “Abrir no Claude”, “Revisar” e para abrir agentes ao criar uma trama.")
+                Text("Um agent para a trama abre o Claude na raiz dela, com acesso a todos os repositórios (no Desktop, só a pasta da trama). Vale para “Abrir no Claude”, “Revisar” e para abrir agentes ao criar uma trama.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

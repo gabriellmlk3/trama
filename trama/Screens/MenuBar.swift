@@ -216,8 +216,9 @@ struct AgentMenuRow: View {
             if agent.isWaiting {
                 Button("Revisar") {
                     if let trama {
-                        let path = model.worktreePath(trama, agent.repo)
-                        model.openClaude(path: path, repo: agent.repo)
+                        let path = agent.repo.isEmpty ? trama.path : model.worktreePath(trama, agent.repo)
+                        let extra = agent.repo.isEmpty ? trama.repos.map { model.worktreePath(trama, $0) } : []
+                        model.openClaude(path: path, repo: agent.repo.isEmpty ? trama.title : agent.repo, extraDirs: extra)
                     }
                     openApp()
                 }

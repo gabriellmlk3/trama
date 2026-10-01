@@ -29,13 +29,8 @@ struct TramaDetailView: View {
                     DetailBar(mode: mode, capsuleVisible: $capsuleVisible, refreshing: refreshing) { refreshToken += 1 }
                     switch mode.wrappedValue {
                     case .loom:
-                        ScrollView {
-                            VStack(alignment: .leading, spacing: 14) {
-                                LoomView(selected: trama)
-                                LoomLegend(trama: trama)
-                            }
-                        }
-                        .scrollIndicators(.automatic)
+                        LoomView(selected: trama)
+                        LoomLegend(trama: trama)
                         CapsuleComposer(trama: trama)
                     case .git:
                         GitView(trama: trama, refreshToken: refreshToken, refreshing: $refreshing)
@@ -173,7 +168,7 @@ struct TramaHeader: View {
                         Label("Abrir no Claude", systemImage: "sparkle")
                     }
                     .buttonStyle(EmberButton())
-                    .help("Abre uma janela do Terminal com o Claude Code em cada repositório da trama")
+                    .help("Abre o Claude Code na trama: um agent com todos os repositórios, ou um por repositório (Ajustes)")
                 }
             }
         }

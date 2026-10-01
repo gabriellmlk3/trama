@@ -28,3 +28,27 @@ enum ClaudeTarget: String, CaseIterable, Identifiable {
         return URL(string: "claude://code/new?folder=\(encoded)&source=trama")
     }
 }
+
+enum AgentScope: String, CaseIterable, Identifiable {
+    case single
+    case perRepo
+
+    static let storageKey = "agentScope"
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .single: return "Um agent para a trama"
+        case .perRepo: return "Um agent por repositório"
+        }
+    }
+
+    static var current: AgentScope {
+        AgentScope(rawValue: UserDefaults.standard.string(forKey: storageKey) ?? "") ?? .single
+    }
+}
+
+func shellQuoted(_ value: String) -> String {
+    "'" + value.replacingOccurrences(of: "'", with: "'\\''") + "'"
+}

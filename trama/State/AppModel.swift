@@ -328,16 +328,23 @@ final class AppModel: ObservableObject {
         if ok { await refreshFindings() }
     }
 
-    func openClaudeInAll(_ t: LiveTrama, target: ClaudeTarget = .current) {
-        for r in t.repos {
-            openClaude(path: worktreePath(t, r), repo: r, target: target)
+    func openClaudeInAll(_ t: LiveTrama, target: ClaudeTarget = .current, scope: AgentScope = .current) {
+        switch scope {
+        case .single:
+            let extra = t.repos.map { worktreePath(t, $0) }
+            openClaude(path: t.path, repo: t.title, target: target, extraDirs: extra)
+        case .perRepo:
+            for r in t.repos {
+                openClaude(path: worktreePath(t, r), repo: r, target: target)
+            }
         }
     }
 
-    func openClaude(path: String, repo: String, target: ClaudeTarget = .current) {
+    func openClaude(path: String, repo: String, target: ClaudeTarget = .current, extraDirs: [String] = []) {
         switch target {
         case .cli:
-            terminals.open(path: path, command: "claude", title: "\(repo) · claude")
+            let command = (["claude"] + extraDirs.flatMap { ["--add-dir", shellQuoted($0)] }).joined(separator: " ")
+            terminals.open(path: path, command: command, title: "\(repo) · claude")
         case .desktop:
             guard let url = ClaudeTarget.desktopURL(folder: path), NSWorkspace.shared.open(url) else {
                 showError("Não consegui abrir o Claude Desktop. Ele está instalado?")

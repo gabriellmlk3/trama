@@ -104,7 +104,7 @@ struct NewTramaView: View {
                     GridRow {
                         label("Agentes")
                         Toggle(isOn: $openAgents) {
-                            Text(openAgents ? "Abrir o Claude Code em cada repositório, já com a cápsula" : "Só preparar os worktrees, você chama os agentes depois")
+                            Text(openAgents ? "Abrir o Claude Code na trama, já com a cápsula (conforme Ajustes)" : "Só preparar os worktrees, você chama os agentes depois")
                                 .font(.system(size: 13))
                                 .foregroundStyle(Theme.text2)
                         }
