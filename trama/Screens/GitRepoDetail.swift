@@ -147,15 +147,6 @@ struct GitRepoDetail: View {
             .background(RoundedRectangle(cornerRadius: 10).fill(Theme.surface))
             .overlay(RoundedRectangle(cornerRadius: 10).stroke(Theme.line2, lineWidth: 1))
             Spacer(minLength: 8)
-            HStack(spacing: 6) {
-                Dot(color: Theme.ok, size: 6)
-                TimelineView(.periodic(from: .now, by: 1)) { ctx in
-                    let seconds = max(0, Int(ctx.date.timeIntervalSince1970) - Int(o.loadedAt))
-                    Text("lido do disco há \(seconds) s")
-                }
-            }
-            .font(.system(size: 11.5))
-            .foregroundStyle(Theme.faded)
             syncChip
         }
     }
