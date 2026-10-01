@@ -48,6 +48,7 @@ extension CLI {
         "agentes": Command(summary: "lista as sessões do Claude Code nas tramas", usage: "trama agentes [--json]", valueFlags: [], run: cmdAgents),
         "hook": Command(summary: "recebe eventos do Claude Code (uso interno)", usage: "trama hook < evento.json", valueFlags: [], run: cmdHook),
         "hooks": Command(summary: "instala ou remove os hooks no Claude Code", usage: "trama hooks instalar|remover|status [--settings caminho]", valueFlags: ["settings"], run: cmdHooks),
+        "ferramentas": Command(summary: "mostra ou instala as CLIs dos provedores (gh, glab, az)", usage: "trama ferramentas [instalar [gh|glab|az|todas]] [--json]", valueFlags: [], run: cmdTools),
         "versao": Command(summary: "mostra a versão", usage: "trama versao", valueFlags: [], run: { c, _ in c.line("trama \(CLI.version)") }),
     ]
 
@@ -625,6 +626,44 @@ extension CLI {
               let out = try? w.handleHook(input),
               !out.isEmpty else { return }
         c.line(out)
+    }
+
+    static func cmdTools(_ c: Context, _ a: Arguments) throws {
+        switch a.positional(0) ?? "status" {
+        case "status":
+            let rows = ToolInstaller.all.map { (tool: $0, version: $0.version) }
+            if c.json {
+                return try c.emitJSON(Dictionary(uniqueKeysWithValues: rows.map { ($0.tool.id, $0.tool.isInstalled) }))
+            }
+            for row in rows {
+                c.line("\(row.tool.isInstalled ? "✓" : "✗") \(row.tool.id) · \(row.tool.title) · \(row.version ?? "não instalado")")
+            }
+            if !ToolInstaller.missing().isEmpty { c.line("  instale com: trama ferramentas instalar todas") }
+        case "instalar", "install":
+            let target = a.positional(1) ?? "todas"
+            let tools: [InstallableTool]
+            if ["todas", "todos", "all"].contains(target) {
+                tools = ToolInstaller.missing()
+            } else if let tool = ToolInstaller.named(target) {
+                tools = [tool]
+            } else {
+                throw TramaError("ferramenta desconhecida: \(target) (use gh, glab, az ou todas)")
+            }
+            guard !tools.isEmpty else { return c.ok("todas as ferramentas já estão instaladas") }
+            for tool in tools {
+                guard !tool.isInstalled else {
+                    c.line("✓ \(tool.id) já instalado")
+                    continue
+                }
+                c.line("instalando \(tool.id)…")
+                guard ToolInstaller.runInTerminal(tool.installCommand) == 0, tool.isInstalled else {
+                    throw TramaError("não consegui instalar o \(tool.id)")
+                }
+                c.ok("\(tool.id) instalado")
+            }
+        default:
+            throw TramaError("use: trama ferramentas [status|instalar [gh|glab|az|todas]]")
+        }
     }
 
     static func cmdHooks(_ c: Context, _ a: Arguments) throws {

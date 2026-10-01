@@ -1497,4 +1497,16 @@ final class GitAuthenticationTests: XCTestCase {
             XCTAssertNotNil(kind.tokenPage(host: kind.defaultHost, organization: "acme"))
         }
     }
+
+    func testInstallerCoversEveryProviderCLI() {
+        for kind in ProviderKind.withCredentials {
+            guard let cli = kind.cliName else { continue }
+            let tool = ToolInstaller.named(cli)
+            XCTAssertNotNil(tool, cli)
+            XCTAssertTrue(tool?.installCommand.contains("brew install") == true, cli)
+            XCTAssertTrue(kind.loginCommand(host: kind.defaultHost)?.contains(tool?.ensureCommand ?? "?") == true, cli)
+        }
+        XCTAssertEqual(ToolInstaller.named("GitHub")?.id, "gh")
+        XCTAssertNil(ToolInstaller.named("foo"))
+    }
 }

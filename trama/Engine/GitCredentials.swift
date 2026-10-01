@@ -66,11 +66,11 @@ extension ProviderKind {
     func loginCommand(host: String) -> String? {
         switch self {
         case .github:
-            return "(command -v gh >/dev/null || brew install gh) && gh auth login -h \(host) -p https -w && gh auth setup-git"
+            return "\(ToolInstaller.named("gh")!.ensureCommand) && gh auth login -h \(host) -p https -w && gh auth setup-git"
         case .gitlab:
-            return "(command -v glab >/dev/null || brew install glab) && glab auth login -h \(host)"
+            return "\(ToolInstaller.named("glab")!.ensureCommand) && glab auth login -h \(host)"
         case .azure:
-            return "(command -v az >/dev/null || brew install azure-cli) && az extension add --name azure-devops --yes && az login"
+            return "\(ToolInstaller.named("az")!.ensureCommand) && az extension add --name azure-devops --yes && az login"
         case .bitbucket, .manual:
             return nil
         }

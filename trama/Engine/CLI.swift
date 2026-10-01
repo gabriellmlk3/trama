@@ -195,7 +195,7 @@ public struct CLI {
     static let order = [
         "init", "repo", "nova", "ls", "status", "puxar", "soltar", "preparar", "subir", "descer", "pr", "merge", "estacionar", "retomar", "arquivar", "caminho", "onde",
         "capsula", "contexto", "objetivo", "decisao", "handoff", "recebido", "pendencia", "feito", "nota", "sincronizar",
-        "achados", "adotar", "limpar", "buscar", "agentes", "hooks", "hook", "estado", "versao",
+        "achados", "adotar", "limpar", "buscar", "agentes", "hooks", "hook", "ferramentas", "estado", "versao",
     ]
 
     public func run(_ args: [String]) -> Int32 {
