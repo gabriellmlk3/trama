@@ -234,3 +234,76 @@ struct MarkerThread: View {
         }
     }
 }
+
+struct CollapsibleSection<Trailing: View, Content: View>: View {
+    let title: String
+    let collapseLabel: String
+    @AppStorage private var expanded: Bool
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    private let trailing: Trailing
+    private let content: Content
+
+    init(
+        title: String,
+        collapseLabel: String,
+        storageKey: String,
+        @ViewBuilder trailing: () -> Trailing,
+        @ViewBuilder content: () -> Content
+    ) {
+        self.title = title
+        self.collapseLabel = collapseLabel
+        self._expanded = AppStorage(wrappedValue: true, storageKey)
+        self.trailing = trailing()
+        self.content = content()
+    }
+
+    private var animation: Animation {
+        reduceMotion ? .easeOut(duration: 0.12) : .spring(response: 0.42, dampingFraction: 0.82)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Button {
+                withAnimation(animation) { expanded.toggle() }
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundStyle(Theme.faded)
+                        .rotationEffect(.degrees(expanded ? 90 : 0))
+                    SectionLabel(text: title)
+                    Spacer(minLength: 0)
+                    trailing
+                        .opacity(expanded ? 1 : 0)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(expanded ? "Recolher \(collapseLabel)" : "Expandir \(collapseLabel)")
+
+            if expanded {
+                VStack(alignment: .leading, spacing: 10) {
+                    content
+                }
+                .transition(
+                    .asymmetric(
+                        insertion: .opacity.combined(with: .offset(y: -10)).combined(with: .scale(scale: 0.98, anchor: .top)),
+                        removal: .opacity.combined(with: .offset(y: -6)).combined(with: .scale(scale: 0.98, anchor: .top))
+                    )
+                )
+            }
+        }
+        .clipped()
+    }
+}
+
+extension CollapsibleSection where Trailing == EmptyView {
+    init(
+        title: String,
+        collapseLabel: String,
+        storageKey: String,
+        @ViewBuilder content: () -> Content
+    ) {
+        self.init(title: title, collapseLabel: collapseLabel, storageKey: storageKey, trailing: { EmptyView() }, content: content)
+    }
+}

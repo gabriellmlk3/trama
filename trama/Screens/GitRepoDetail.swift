@@ -10,6 +10,7 @@ struct GitCard<Content: View>: View {
 
     var body: some View {
         content
+            .clipShape(RoundedRectangle(cornerRadius: 14))
             .background(RoundedRectangle(cornerRadius: 14).fill(Theme.loom))
             .overlay(RoundedRectangle(cornerRadius: 14).stroke(Theme.line, lineWidth: 1))
     }
@@ -86,6 +87,13 @@ struct GitRepoDetail: View {
             }
             Spacer(minLength: 8)
             HStack(spacing: 8) {
+                Button {
+                    model.openClaude(path: path, repo: repo.name)
+                } label: {
+                    Label("Agente", systemImage: "sparkles")
+                }
+                .buttonStyle(GhostButton(compact: true))
+                .help("Abre o Claude neste worktree (conforme Ajustes)")
                 Button {
                     model.terminals.open(path: path, command: nil, title: "\(repo.name) · \(trama.slug)")
                 } label: {

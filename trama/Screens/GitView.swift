@@ -259,26 +259,31 @@ struct RepoList: View {
             VStack(alignment: .leading, spacing: 0) {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 10) {
-                        HStack {
-                            SectionLabel(text: "Nesta trama · \(trama.status.count)")
-                            Spacer()
-                            Text("base \(trama.base ?? trama.status.first?.base ?? "main")")
-                                .font(Theme.mono(11))
-                                .foregroundStyle(Theme.faded)
-                        }
-                        .padding(.bottom, 2)
-                        ForEach(Array(trama.status.enumerated()), id: \.element.id) { i, s in
-                            RepoCard(trama: trama, status: s, selected: s.repo == selected) { onSelect(s.repo) }
-                                .transition(.opacity.combined(with: .offset(y: 6)))
-                                .animation(.easeOut(duration: 0.3).delay(Double(i) * 0.04), value: trama.slug)
+                        CollapsibleSection(
+                            title: "Nesta trama · \(trama.status.count)",
+                            collapseLabel: "repositórios desta trama",
+                            storageKey: "insideExpanded",
+                            trailing: {
+                                Text("base \(trama.base ?? trama.status.first?.base ?? "main")")
+                                    .font(Theme.mono(11))
+                                    .foregroundStyle(Theme.faded)
+                            }
+                        ) {
+                            ForEach(trama.status) { s in
+                                RepoCard(trama: trama, status: s, selected: s.repo == selected) { onSelect(s.repo) }
+                            }
                         }
                         if !outside.isEmpty {
-                            SectionLabel(text: "Fora desta trama · \(outside.count)")
-                                .padding(.top, 14)
-                                .padding(.bottom, 2)
-                            ForEach(outside) { r in
-                                OutsideRow(trama: trama, repo: r)
+                            CollapsibleSection(
+                                title: "Fora desta trama · \(outside.count)",
+                                collapseLabel: "repositórios fora desta trama",
+                                storageKey: "outsideExpanded"
+                            ) {
+                                ForEach(outside) { r in
+                                    OutsideRow(trama: trama, repo: r)
+                                }
                             }
+                            .padding(.top, 14)
                         }
                     }
                     .padding(.bottom, 12)
