@@ -201,6 +201,8 @@ struct BranchThread: View {
         if let head = overview.head {
             if hasAhead {
                 nodeLabel("HEAD · \(head.hash)", x: bottomLast - 10, y: bottomY + 22)
+            } else if overview.baseTip != nil, !behindShown.isEmpty {
+                nodeLabel("HEAD · \(head.hash)", x: topX(0) + 14, y: topY + 22)
             } else {
                 nodeLabel("HEAD · \(head.hash)", x: topX(0) - 10, y: topY - 22)
             }
