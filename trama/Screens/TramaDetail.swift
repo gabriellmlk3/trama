@@ -181,10 +181,14 @@ struct TramaHeader: View {
                 if let source = mergeSource { Task { await model.merge(source, into: trama) } }
                 mergeSource = nil
             }
+            Button("Mesclar e resolver conflitos") {
+                if let source = mergeSource { Task { await model.merge(source, into: trama, allowConflicts: true) } }
+                mergeSource = nil
+            }
             Button("Cancelar", role: .cancel) { mergeSource = nil }
         } message: {
             if let source = mergeSource {
-                Text("Faz merge da branch \(source.branch) em \(trama.branch), nos repositórios que as duas têm. Se algum worktree daqui tiver mudanças não commitadas ou o merge previr conflito, nada é mesclado.")
+                Text("Faz merge da branch \(source.branch) em \(trama.branch), nos repositórios que as duas têm. Se algum worktree daqui tiver mudanças não commitadas ou o merge previr conflito, “Fazer merge” não mescla nada; “Mesclar e resolver conflitos” deixa o merge em andamento na aba Git.")
             }
         }
         .confirmationDialog("Abrir PRs de “\(trama.title)”?", isPresented: $confirmingPRs) {

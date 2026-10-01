@@ -416,14 +416,16 @@ final class AppModel: ObservableObject {
         await perform(success: "Receita de \(name) salva") { _ = try $0.setRecipe(name, copy: copy, run: run) }
     }
 
-    func merge(_ source: LiveTrama, into target: LiveTrama) async {
+    func merge(_ source: LiveTrama, into target: LiveTrama, allowConflicts: Bool = false) async {
         busy = true
         defer { busy = false }
         do {
-            let results = try await Core.run { try $0.mergeTrama(from: source.slug, into: target.slug) }
+            let results = try await Core.run { try $0.mergeTrama(from: source.slug, into: target.slug, allowConflicts: allowConflicts) }
             await refresh()
             let lines = results.map { "\($0.repo): \($0.situation)" + ($0.detail.map { " · " + $0 } ?? "") }
-            if results.allSatisfy({ $0.situation == "mesclado" || $0.situation == "atualizado" }) {
+            if allowConflicts, results.contains(where: { $0.situation == "conflito" }) {
+                showNotice("Merge com conflitos · resolva na aba Git")
+            } else if results.allSatisfy({ $0.situation == "mesclado" || $0.situation == "atualizado" }) {
                 showNotice("“\(source.title)” entrou em “\(target.title)”")
             } else {
                 showError(lines.joined(separator: "\n"))
@@ -433,13 +435,15 @@ final class AppModel: ObservableObject {
         }
     }
 
-    func mergeWorktree(_ repo: String, from source: String, into target: String, label: String) async {
+    func mergeWorktree(_ repo: String, from source: String, into target: String, label: String, allowConflicts: Bool = false) async {
         busy = true
         defer { busy = false }
         do {
-            let result = try await Core.run { try $0.mergeWorktrees(repo: repo, from: source, into: target) }
+            let result = try await Core.run { try $0.mergeWorktrees(repo: repo, from: source, into: target, allowConflicts: allowConflicts) }
             await refresh()
-            if result.situation == "mesclado" || result.situation == "atualizado" {
+            if result.situation == "conflito" {
+                showNotice("Merge em \(label) com conflitos · resolva abaixo")
+            } else if result.situation == "mesclado" || result.situation == "atualizado" {
                 showNotice("Merge em \(label): \(result.detail ?? result.situation)")
             } else {
                 showError("\(label): \(result.detail ?? result.situation)")
@@ -447,6 +451,22 @@ final class AppModel: ObservableObject {
         } catch {
             showError(errorMessage(error))
         }
+    }
+
+    func concludeMerge(_ repo: String, worktree: String) async -> Bool {
+        await perform(success: "Merge concluído em \(repo)") { _ = try $0.concludeMerge(repo: repo, worktree: worktree) }
+    }
+
+    func abortMerge(_ repo: String, worktree: String) async -> Bool {
+        await perform(success: "Merge abortado em \(repo)") { try $0.abortMerge(repo: repo, worktree: worktree) }
+    }
+
+    func acceptSide(_ repo: String, worktree: String, file: String, side: ConflictSide) async -> Bool {
+        await perform { try $0.acceptSide(repo: repo, worktree: worktree, file: file, side: side) }
+    }
+
+    func saveResolution(_ repo: String, worktree: String, file: String, content: String) async -> Bool {
+        await perform(success: "\(file) resolvido") { try $0.saveResolution(repo: repo, worktree: worktree, file: file, content: content) }
     }
 
     func setEditor(_ name: String, _ editor: String) async {

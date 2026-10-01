@@ -629,6 +629,73 @@ final class FlowTests: XCTestCase {
         XCTAssertFalse(try Git.statusLines(apiB).isEmpty)
     }
 
+    func testResolveMergeConflicts() throws {
+        let w = try lab.workspace()
+        let (a, _) = try w.newTrama(NewTramaOptions(title: "Origem", repos: ["api"], noFetch: true))
+        let (b, _) = try w.newTrama(NewTramaOptions(title: "Destino", repos: ["api"], noFetch: true))
+        let apiA = w.worktreePath(a.slug, "rebocs_api")
+        let apiB = w.worktreePath(b.slug, "rebocs_api")
+        try lab.commit(apiA, "src/app.txt", "linha A\nlinha 2\nlinha 3\n", "mexe A")
+        try lab.commit(apiA, "outro.txt", "A\n", "outro A")
+        try lab.commit(apiB, "src/app.txt", "linha B\nlinha 2\nlinha 3\n", "mexe B")
+        try lab.commit(apiB, "outro.txt", "B\n", "outro B")
+        XCTAssertEqual(try w.mergeTrama(from: a.slug, into: b.slug, allowConflicts: true).map(\.situation), ["conflito"])
+        let state = try w.conflictState(repo: "api", worktree: apiB)
+        XCTAssertTrue(state.merging)
+        XCTAssertEqual(state.files.map(\.path), ["outro.txt", "src/app.txt"])
+        XCTAssertThrowsError(try w.concludeMerge(repo: "api", worktree: apiB), "ainda há conflitos")
+        let doc = try w.conflictDocument(repo: "api", worktree: apiB, file: "src/app.txt")
+        XCTAssertEqual(doc.hunks.count, 1)
+        XCTAssertEqual(doc.hunks[0].ours, ["linha B"])
+        XCTAssertEqual(doc.hunks[0].theirs, ["linha A"])
+        XCTAssertThrowsError(try doc.render([:]))
+        let merged = try doc.render([doc.hunks[0].id: .both])
+        XCTAssertEqual(merged, "linha B\nlinha A\nlinha 2\nlinha 3\n")
+        try w.saveResolution(repo: "api", worktree: apiB, file: "src/app.txt", content: merged)
+        try w.acceptSide(repo: "api", worktree: apiB, file: "outro.txt", side: .theirs)
+        XCTAssertEqual(try File.read(apiB + "/outro.txt"), "A\n")
+        XCTAssertTrue(try w.conflictState(repo: "api", worktree: apiB).files.isEmpty)
+        XCTAssertThrowsError(try w.acceptSide(repo: "api", worktree: apiB, file: "../fora.txt", side: .ours))
+        try w.concludeMerge(repo: "api", worktree: apiB)
+        XCTAssertFalse(try w.conflictState(repo: "api", worktree: apiB).merging)
+        XCTAssertEqual(try Git.statusLines(apiB), [])
+        XCTAssertEqual(try File.read(apiB + "/src/app.txt"), merged)
+    }
+
+    func testAbortMergeAndDeletedByOneSide() throws {
+        let w = try lab.workspace()
+        let (a, _) = try w.newTrama(NewTramaOptions(title: "Origem", repos: ["api"], noFetch: true))
+        let (b, _) = try w.newTrama(NewTramaOptions(title: "Destino", repos: ["api"], noFetch: true))
+        let apiA = w.worktreePath(a.slug, "rebocs_api")
+        let apiB = w.worktreePath(b.slug, "rebocs_api")
+        try lab.git(apiA, "rm", "-q", "src/app.txt")
+        try lab.git(apiA, "commit", "-q", "-m", "remove")
+        try lab.commit(apiB, "src/app.txt", "linha 1 mudada\nlinha 2\nlinha 3\n", "muda")
+        XCTAssertEqual(try w.mergeTrama(from: a.slug, into: b.slug, allowConflicts: true).map(\.situation), ["conflito"])
+        let files = try w.conflictState(repo: "api", worktree: apiB).files
+        XCTAssertEqual(files.map(\.code), ["UD"])
+        XCTAssertFalse(files[0].canMerge)
+        XCTAssertThrowsError(try w.conflictDocument(repo: "api", worktree: apiB, file: "src/app.txt"))
+        try w.abortMerge(repo: "api", worktree: apiB)
+        XCTAssertFalse(try w.conflictState(repo: "api", worktree: apiB).merging)
+        XCTAssertTrue(Paths.exists(apiB + "/src/app.txt"))
+        XCTAssertEqual(try w.mergeTrama(from: a.slug, into: b.slug, allowConflicts: true).map(\.situation), ["conflito"])
+        try w.acceptSide(repo: "api", worktree: apiB, file: "src/app.txt", side: .theirs)
+        XCTAssertFalse(Paths.exists(apiB + "/src/app.txt"))
+        try w.concludeMerge(repo: "api", worktree: apiB)
+    }
+
+    func testConflictParserKeepsContextAndLabels() throws {
+        let text = "a\n<<<<<<< HEAD\nmeu\n=======\nseu\n>>>>>>> trama/x\nb\n<<<<<<< HEAD\n=======\nnovo\n>>>>>>> trama/x\n"
+        let doc = try ConflictParser.parse(path: "f", text: text)
+        XCTAssertEqual(doc.hunks.count, 2)
+        XCTAssertEqual(doc.oursLabel, "HEAD")
+        XCTAssertEqual(doc.theirsLabel, "trama/x")
+        XCTAssertEqual(try doc.render(Dictionary(uniqueKeysWithValues: doc.hunks.map { ($0.id, ConflictResolution.theirs) })), "a\nseu\nb\nnovo\n")
+        XCTAssertEqual(try doc.render(Dictionary(uniqueKeysWithValues: doc.hunks.map { ($0.id, ConflictResolution.custom(["x"])) })), "a\nx\nb\nx\n")
+        XCTAssertThrowsError(try ConflictParser.parse(path: "f", text: "<<<<<<< HEAD\nx\n"))
+    }
+
     func testMergeBetweenWorktrees() throws {
         let w = try lab.workspace()
         let main = lab.repos["rebocs_api"]!

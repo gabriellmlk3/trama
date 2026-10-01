@@ -33,6 +33,7 @@ struct GitRepoDetail: View {
         VStack(alignment: .leading, spacing: 16) {
             header
             chips
+            ConflictsPanel(repo: repo.name, worktree: path)
             if let o = overview {
                 ViewThatFits(in: .horizontal) {
                     HStack(alignment: .top, spacing: 14) {
@@ -255,6 +256,7 @@ struct WorktreesCard: View {
     let repo: RepoConfig
     let trama: LiveTrama
     @State private var pending: (from: WorktreeSummary, into: WorktreeSummary)?
+    @State private var resolvingIn: WorktreeSummary?
 
     func title(_ w: WorktreeSummary) -> String {
         if w.isPrimary { return "Cópia principal" }
@@ -300,9 +302,21 @@ struct WorktreesCard: View {
                                     .truncationMode(.middle)
                             }
                             Spacer(minLength: 6)
-                            Text(trailing(w))
-                                .font(.system(size: 12))
-                                .foregroundStyle(w.changed > 0 ? Theme.text3 : Theme.faded)
+                            if w.conflicts > 0 {
+                                Button {
+                                    resolvingIn = w
+                                } label: {
+                                    Label("\(w.conflicts) em conflito", systemImage: "exclamationmark.triangle.fill")
+                                        .font(.system(size: 11.5))
+                                        .foregroundStyle(Theme.waitText)
+                                }
+                                .buttonStyle(.plain)
+                                .help("Resolver os conflitos deste worktree")
+                            } else {
+                                Text(trailing(w))
+                                    .font(.system(size: 12))
+                                    .foregroundStyle(w.changed > 0 ? Theme.text3 : Theme.faded)
+                            }
                             if !current(w), !w.branch.isEmpty, let mine = overview.worktrees.first(where: current), !mine.branch.isEmpty {
                                 Menu {
                                     Button("Mesclar \(mine.branch) em \(w.branch)") { pending = (mine, w) }
@@ -334,6 +348,9 @@ struct WorktreesCard: View {
             }
             .padding(14)
         }
+        .sheet(item: $resolvingIn) { w in
+            ConflictsSheet(repo: repo.name, worktree: w.path, title: title(w))
+        }
         .alert("Fazer merge?", isPresented: Binding(get: { pending != nil }, set: { if !$0 { pending = nil } })) {
             Button("Fazer merge") {
                 if let p = pending {
@@ -341,11 +358,42 @@ struct WorktreesCard: View {
                 }
                 pending = nil
             }
+            Button("Mesclar e resolver conflitos") {
+                if let p = pending {
+                    Task { await model.mergeWorktree(repo.name, from: p.from.path, into: p.into.path, label: title(p.into), allowConflicts: true) }
+                }
+                pending = nil
+            }
             Button("Cancelar", role: .cancel) { pending = nil }
         } message: {
             if let p = pending {
-                Text("Mescla \(p.from.branch) em \(p.into.branch) (\(title(p.into))). Se o merge previr conflito, nada é mesclado." + (p.into.changed > 0 ? " Esse worktree tem \(p.into.changed) \(plural(p.into.changed, "alteração", "alterações")) não commitada(s): o Git só recusa se elas tocarem os mesmos arquivos." : ""))
+                Text("Mescla \(p.from.branch) em \(p.into.branch) (\(title(p.into))). Se o merge previr conflito, “Fazer merge” não mescla nada; “Mesclar e resolver conflitos” deixa o merge em andamento para você resolver aqui." + (p.into.changed > 0 ? " Esse worktree tem \(p.into.changed) \(plural(p.into.changed, "alteração", "alterações")) não commitada(s): o Git só recusa se elas tocarem os mesmos arquivos." : ""))
             }
         }
+    }
+}
+
+struct ConflictsSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    let repo: String
+    let worktree: String
+    let title: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack {
+                Text("Conflitos em \(title)")
+                    .font(.system(size: 14, weight: .semibold))
+                Spacer()
+                Button("Fechar") { dismiss() }
+                    .buttonStyle(GhostButton(compact: true))
+                    .keyboardShortcut(.cancelAction)
+            }
+            ConflictsPanel(repo: repo, worktree: worktree)
+            Spacer(minLength: 0)
+        }
+        .padding(20)
+        .frame(minWidth: 640, minHeight: 280)
+        .background(Theme.background)
     }
 }
