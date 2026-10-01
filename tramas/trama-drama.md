@@ -25,3 +25,4 @@ Outro
 - 2026-09-30 22:39 · merge de main em trama
 - 2026-10-01 11:21 · Objetivo atingido: Fazer com que seja possível selecionar se vai abrir o claude desktop ou cli emblutido, em todos os locais que fazer chamada para tal.
 - 2026-10-01 12:21 · merge de main em trama
+- 2026-10-01 13:20 · merge de main em trama

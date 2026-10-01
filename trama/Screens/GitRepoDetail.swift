@@ -209,7 +209,7 @@ struct GitRepoDetail: View {
     @ViewBuilder func tabContent(_ o: GitOverview) -> some View {
         switch tab {
         case .changes:
-            ChangesPane(changes: o.changes, selectedFile: $selectedFile, diff: diff, path: path, status: status)
+            ChangesPane(trama: trama, repo: repo.name, merging: o.merging, changes: o.changes, selectedFile: $selectedFile, diff: diff, path: path, status: status)
         case .commits:
             CommitsPane(commits: o.ahead, total: o.aheadCount, tint: Theme.emberLight,
                         empty: "Nenhum commit à frente de \(o.base) ainda.")
@@ -331,12 +331,17 @@ struct WorktreesCard: View {
                                     Button("Trazer \(w.branch) para \(mine.branch)") { pending = (w, mine) }
                                 } label: {
                                     Image(systemName: "arrow.triangle.merge")
+                                        .font(.system(size: 11.5))
+                                        .foregroundStyle(Theme.text2)
+                                        .frame(width: 26, height: 26)
+                                        .background(RoundedRectangle(cornerRadius: 7).fill(Theme.surface))
+                                        .overlay(RoundedRectangle(cornerRadius: 7).stroke(Theme.line2, lineWidth: 1))
+                                        .contentShape(Rectangle())
                                 }
                                 .menuStyle(.button)
                                 .buttonStyle(.plain)
                                 .menuIndicator(.hidden)
-                                .frame(width: 22)
-                                .foregroundStyle(Theme.text3)
+                                .fixedSize()
                                 .help("Fazer merge entre este worktree e \(title(w))")
                             }
                         }

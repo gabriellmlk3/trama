@@ -36,6 +36,44 @@ public struct ConflictHunk: Identifiable, Hashable, Sendable {
     public var ours: [String]
     public var theirs: [String]
     public var base: [String]?
+
+    public var commonLines: Set<String> { Set(ours).intersection(theirs) }
+
+    public func composed(ours pickedOurs: Set<Int>, theirs pickedTheirs: Set<Int>) -> [String] {
+        let fromOurs = ours.enumerated().filter { pickedOurs.contains($0.offset) }.map(\.element)
+        var seen = Set(fromOurs)
+        var out = fromOurs
+        for (i, line) in theirs.enumerated() where pickedTheirs.contains(i) {
+            if line.trimmingCharacters(in: .whitespaces).isEmpty || !seen.contains(line) {
+                out.append(line)
+                seen.insert(line)
+            }
+        }
+        return out
+    }
+}
+
+public struct ConflictPicks: Hashable, Sendable {
+    public var ours: Set<Int> = []
+    public var theirs: Set<Int> = []
+
+    public var isEmpty: Bool { ours.isEmpty && theirs.isEmpty }
+
+    public init(ours: Set<Int> = [], theirs: Set<Int> = []) {
+        self.ours = ours
+        self.theirs = theirs
+    }
+
+    public static func all(_ hunk: ConflictHunk, ours: Bool, theirs: Bool) -> ConflictPicks {
+        ConflictPicks(ours: ours ? Set(hunk.ours.indices) : [], theirs: theirs ? Set(hunk.theirs.indices) : [])
+    }
+
+    public func resolution(for hunk: ConflictHunk) -> ConflictResolution? {
+        if isEmpty { return nil }
+        if self == .all(hunk, ours: true, theirs: false) { return .ours }
+        if self == .all(hunk, ours: false, theirs: true) { return .theirs }
+        return .custom(hunk.composed(ours: ours, theirs: theirs))
+    }
 }
 
 public enum ConflictSegment: Identifiable, Hashable, Sendable {

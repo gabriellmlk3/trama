@@ -56,6 +56,7 @@ struct BranchThread: View {
 
     @AppStorage(ThreadLayout.storageKey) private var layoutName = ThreadLayout.horizontal.rawValue
     @State private var drawn = false
+    @Namespace private var layoutPill
 
     private let labelWidth: CGFloat = 116
     private let topY: CGFloat = 50
@@ -76,6 +77,27 @@ struct BranchThread: View {
     func topX(_ i: Int) -> CGFloat { forkX + CGFloat(i) * step }
     func bottomX(_ j: Int) -> CGFloat { forkX + CGFloat(j + 1) * step }
 
+    func layoutButton(_ icon: String, value: ThreadLayout) -> some View {
+        Button {
+            withAnimation(.spring(response: 0.32, dampingFraction: 0.82)) { layoutName = value.rawValue }
+        } label: {
+            Image(systemName: icon)
+                .font(.system(size: 11.5, weight: layout == value ? .semibold : .regular))
+                .foregroundStyle(layout == value ? Theme.text : Theme.faded)
+                .frame(width: 30, height: 26)
+                .background {
+                    if layout == value {
+                        RoundedRectangle(cornerRadius: 7)
+                            .fill(Theme.surface2)
+                            .matchedGeometryEffect(id: "layoutPill", in: layoutPill)
+                    }
+                }
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(value == .horizontal ? "Horizontal" : "Vertical")
+    }
+
     var body: some View {
         GitCard {
             VStack(alignment: .leading, spacing: 0) {
@@ -89,13 +111,13 @@ struct BranchThread: View {
                             .foregroundStyle(Theme.faded)
                             .lineLimit(1)
                     }
-                    Picker("Layout do fio", selection: $layoutName) {
-                        Image(systemName: "arrow.right").tag(ThreadLayout.horizontal.rawValue)
-                        Image(systemName: "arrow.down").tag(ThreadLayout.vertical.rawValue)
+                    HStack(spacing: 2) {
+                        layoutButton("arrow.right", value: .horizontal)
+                        layoutButton("arrow.down", value: .vertical)
                     }
-                    .pickerStyle(.segmented)
-                    .labelsHidden()
-                    .frame(width: 70)
+                    .padding(3)
+                    .background(RoundedRectangle(cornerRadius: 9).fill(Theme.surface))
+                    .overlay(RoundedRectangle(cornerRadius: 9).stroke(Theme.line2, lineWidth: 1))
                     .help("Mostrar o fio na horizontal ou na vertical")
                 }
                 .padding(.horizontal, 14)

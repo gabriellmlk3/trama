@@ -38,7 +38,7 @@ struct TramaDetailView: View {
                 }
                 .padding(.horizontal, 28)
                 .padding(.top, 20)
-                .padding(.bottom, 22)
+                .padding(.bottom, mode.wrappedValue == .git ? 0 : 22)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                 if capsuleVisible {
                     Rectangle().fill(Theme.line).frame(width: 1)

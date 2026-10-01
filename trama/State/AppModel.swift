@@ -313,6 +313,10 @@ final class AppModel: ObservableObject {
         await perform(success: "Cápsula commitada no repositório de contexto") { _ = try $0.syncCapsule(slug) }
     }
 
+    func commit(_ slug: String, repo: String, paths: [String], message: String) async -> Bool {
+        await perform(success: "Commit feito em \(repo)") { _ = try $0.commitChanges(slug, repo: repo, paths: paths, message: message) }
+    }
+
     func resolve(_ finding: Finding) async {
         let ok: Bool
         switch finding.type {

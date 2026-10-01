@@ -210,6 +210,29 @@ extension Workspace {
         return Git.fileDiff(wt, change.path, untracked: change.untracked)
     }
 
+    @discardableResult
+    public func commitChanges(_ slug: String, repo name: String, paths: [String], message: String) throws -> Commit {
+        let wt = worktreePath(slug, try repo(name).name)
+        guard Paths.isDirectory(wt) else { throw TramaError("worktree não encontrado em \(Paths.abbreviate(wt))") }
+        let subject = message.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !subject.isEmpty else { throw TramaError("escreva uma mensagem de commit") }
+        guard !paths.isEmpty else { throw TramaError("escolha ao menos um arquivo para commitar") }
+        let all = Set(Git.fileChanges(wt).map(\.path))
+        let chosen = Set(paths)
+        guard chosen.isSubset(of: all) else { throw TramaError("a lista de arquivos mudou · recarregue e tente de novo") }
+        if chosen == all {
+            try Git.run(wt, "add", "-A")
+            try Git.run(wt, "commit", "--quiet", "-m", subject)
+        } else {
+            if Git.isMerging(wt) { throw TramaError("há um merge em andamento · o commit precisa incluir todos os arquivos") }
+            let list = chosen.sorted()
+            try Git.run(wt, ["add", "-A", "--"] + list)
+            try Git.run(wt, ["commit", "--quiet", "-m", subject, "--"] + list)
+        }
+        guard let made = Git.lastCommit(wt) else { throw TramaError("o commit não foi criado") }
+        return made
+    }
+
     func worktreeSummaries(_ r: RepoConfig, base: String) -> [WorktreeSummary] {
         Git.listWorktrees(r.path).filter { !$0.bare && !$0.prunable }.map { info in
             let ref = Git.baseRef(info.path, base)

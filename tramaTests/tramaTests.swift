@@ -685,6 +685,16 @@ final class FlowTests: XCTestCase {
         try w.concludeMerge(repo: "api", worktree: apiB)
     }
 
+    func testConflictPicksComposeLinesWithoutDuplicates() {
+        let hunk = ConflictHunk(id: 0, ours: ["a", "b", "c"], theirs: ["b", "d"], base: nil)
+        XCTAssertEqual(hunk.commonLines, ["b"])
+        XCTAssertEqual(hunk.composed(ours: [0, 1], theirs: [0, 1]), ["a", "b", "d"])
+        XCTAssertEqual(hunk.composed(ours: [], theirs: [1]), ["d"])
+        XCTAssertNil(ConflictPicks().resolution(for: hunk))
+        XCTAssertEqual(ConflictPicks.all(hunk, ours: true, theirs: false).resolution(for: hunk), .ours)
+        XCTAssertEqual(ConflictPicks(ours: [2], theirs: [1]).resolution(for: hunk), .custom(["c", "d"]))
+    }
+
     func testConflictParserKeepsContextAndLabels() throws {
         let text = "a\n<<<<<<< HEAD\nmeu\n=======\nseu\n>>>>>>> trama/x\nb\n<<<<<<< HEAD\n=======\nnovo\n>>>>>>> trama/x\n"
         let doc = try ConflictParser.parse(path: "f", text: text)
@@ -890,6 +900,24 @@ final class GitOverviewTests: XCTestCase {
         XCTAssertEqual(lines[2].oldNumber, 3)
         XCTAssertEqual(lines[3].newNumber, 3)
         XCTAssertEqual(lines[4].newNumber, 4)
+    }
+
+    func testCommitChangesStagesOnlyChosenFiles() throws {
+        let lab = try Lab()
+        defer { lab.cleanup() }
+        let w = try lab.workspace()
+        let (t, _) = try w.newTrama(NewTramaOptions(title: "Commit pela UI", repos: ["api"], noFetch: true))
+        let wt = w.worktreePath(t.slug, "rebocs_api")
+        try lab.write(wt + "/src/app.txt", "linha 1\nmudou\nlinha 3\n")
+        try lab.write(wt + "/solto.txt", "a\n")
+
+        XCTAssertThrowsError(try w.commitChanges(t.slug, repo: "api", paths: ["solto.txt"], message: "  "))
+        let made = try w.commitChanges(t.slug, repo: "api", paths: ["solto.txt"], message: "só o solto")
+        XCTAssertEqual(made.subject, "só o solto")
+        XCTAssertEqual(try w.gitOverview(t.slug, repo: "api").changes.map(\.path), ["src/app.txt"])
+
+        try w.commitChanges(t.slug, repo: "api", paths: ["src/app.txt"], message: "o resto")
+        XCTAssertTrue(try w.gitOverview(t.slug, repo: "api").changes.isEmpty)
     }
 
     func testOverviewOfWorktree() throws {

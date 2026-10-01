@@ -103,6 +103,7 @@ struct GitView: View {
     let refreshToken: Int
     @Binding var refreshing: Bool
 
+    @AppStorage("repoListVisible") private var repoListVisible = true
     @State private var selectedRepo: String?
     @State private var overview: GitOverview?
     @State private var overviewRepo: String?
@@ -128,9 +129,32 @@ struct GitView: View {
             let wide = geo.size.width >= 760
             Group {
                 if wide {
-                    HStack(alignment: .top, spacing: 26) {
-                        RepoList(trama: trama, outside: outside, selected: currentRepo, horizontal: false) { select($0) }
+                    HStack(alignment: .top, spacing: repoListVisible ? 26 : 14) {
+                        if repoListVisible {
+                            VStack(alignment: .leading, spacing: 8) {
+                                Button {
+                                    withAnimation(.easeInOut(duration: 0.22)) { repoListVisible = false }
+                                } label: {
+                                    Image(systemName: "sidebar.left")
+                                }
+                                .buttonStyle(IconButton(size: 28))
+                                .help("Recolher a lista de repositórios")
+                                .accessibilityLabel("Recolher a lista de repositórios")
+                                RepoList(trama: trama, outside: outside, selected: currentRepo, horizontal: false) { select($0) }
+                            }
                             .frame(width: 272)
+                            .transition(.move(edge: .leading).combined(with: .opacity))
+                        } else {
+                            Button {
+                                withAnimation(.easeInOut(duration: 0.22)) { repoListVisible = true }
+                            } label: {
+                                Image(systemName: "sidebar.left")
+                                    .foregroundStyle(Theme.emberText)
+                            }
+                            .buttonStyle(IconButton(size: 28))
+                            .help("Mostrar a lista de repositórios")
+                            .accessibilityLabel("Mostrar a lista de repositórios")
+                        }
                         detail
                     }
                 } else {
@@ -175,7 +199,6 @@ struct GitView: View {
                 )
                 .id(name)
                 .transition(.opacity.combined(with: .offset(y: 8)))
-                .padding(.bottom, 28)
             }
             .scrollIndicators(.automatic)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)

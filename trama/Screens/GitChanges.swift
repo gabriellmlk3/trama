@@ -2,13 +2,22 @@ import Foundation
 import SwiftUI
 
 struct ChangesPane: View {
+    let trama: LiveTrama
+    let repo: String
+    let merging: Bool
     let changes: [FileChange]
     @Binding var selectedFile: String?
     let diff: [DiffLine]
     let path: String
     let status: RepoStatus
 
+    @State private var unchecked: Set<String> = []
+
     var selected: FileChange? { changes.first(where: { $0.id == selectedFile }) }
+
+    var commitPanel: some View {
+        CommitPanel(trama: trama, repo: repo, merging: merging, changes: changes, unchecked: $unchecked)
+    }
 
     var body: some View {
         if changes.isEmpty {
@@ -29,14 +38,16 @@ struct ChangesPane: View {
             ViewThatFits(in: .horizontal) {
                 HStack(alignment: .top, spacing: 14) {
                     VStack(spacing: 14) {
-                        FileList(changes: changes, selectedFile: $selectedFile)
+                        FileList(changes: changes, selectedFile: $selectedFile, unchecked: $unchecked)
+                        commitPanel
                         AgentCard(status: status)
                     }
                     .frame(width: 252)
                     DiffPane(change: selected, lines: diff, path: path)
                 }
                 VStack(spacing: 14) {
-                    FileList(changes: changes, selectedFile: $selectedFile)
+                    FileList(changes: changes, selectedFile: $selectedFile, unchecked: $unchecked)
+                    commitPanel
                     DiffPane(change: selected, lines: diff, path: path)
                     AgentCard(status: status)
                 }
@@ -82,11 +93,13 @@ struct Delta: View {
 
 struct FileList: View {
     @Binding var selectedFile: String?
+    let unchecked: Binding<Set<String>>?
     let changes: [FileChange]
 
-    init(changes: [FileChange], selectedFile: Binding<String?>) {
+    init(changes: [FileChange], selectedFile: Binding<String?>, unchecked: Binding<Set<String>>? = nil) {
         self.changes = changes
         self._selectedFile = selectedFile
+        self.unchecked = unchecked
     }
 
     var body: some View {
@@ -102,7 +115,10 @@ struct FileList: View {
                 .padding(.horizontal, 6)
                 VStack(spacing: 3) {
                     ForEach(changes) { c in
-                        FileRow(change: c, selected: c.id == selectedFile) {
+                        FileRow(change: c, selected: c.id == selectedFile, checked: unchecked.map { !$0.wrappedValue.contains(c.id) }, toggle: {
+                            guard let unchecked else { return }
+                            if unchecked.wrappedValue.contains(c.id) { unchecked.wrappedValue.remove(c.id) } else { unchecked.wrappedValue.insert(c.id) }
+                        }) {
                             withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) { selectedFile = c.id }
                         }
                         .transition(.opacity.combined(with: .offset(x: -8)))
@@ -118,12 +134,24 @@ struct FileList: View {
 struct FileRow: View {
     let change: FileChange
     let selected: Bool
+    let checked: Bool?
+    let toggle: () -> Void
     let action: () -> Void
     @State private var hovering = false
 
     var body: some View {
         Button(action: action) {
             HStack(spacing: 9) {
+                if let checked {
+                    Button(action: toggle) {
+                        Image(systemName: checked ? "checkmark.square.fill" : "square")
+                            .font(.system(size: 13))
+                            .foregroundStyle(checked ? Theme.emberLight : Theme.faded)
+                    }
+                    .buttonStyle(.plain)
+                    .help(checked ? "Fora do próximo commit" : "Incluir no próximo commit")
+                    .accessibilityLabel(checked ? "Excluir do commit" : "Incluir no commit")
+                }
                 FileBadge(code: change.code)
                 VStack(alignment: .leading, spacing: 3) {
                     Text(change.name)
@@ -381,6 +409,66 @@ struct AgentCard: View {
                 .foregroundStyle(Theme.text3)
                 .lineLimit(1)
                 .truncationMode(.middle)
+        }
+    }
+}
+
+struct CommitPanel: View {
+    @EnvironmentObject var model: AppModel
+    let trama: LiveTrama
+    let repo: String
+    let merging: Bool
+    let changes: [FileChange]
+    @Binding var unchecked: Set<String>
+    @State private var message = ""
+
+    var chosen: [String] { changes.map(\.id).filter { !unchecked.contains($0) } }
+    var canCommit: Bool {
+        !model.busy && !chosen.isEmpty && !message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && (!merging || chosen.count == changes.count)
+    }
+
+    var body: some View {
+        GitCard {
+            VStack(alignment: .leading, spacing: 10) {
+                TextField("Mensagem do commit", text: $message, axis: .vertical)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 12.5))
+                    .lineLimit(1...5)
+                    .padding(9)
+                    .background(RoundedRectangle(cornerRadius: 8).fill(Theme.surface))
+                    .overlay(RoundedRectangle(cornerRadius: 8).stroke(Theme.line, lineWidth: 1))
+                if merging && chosen.count != changes.count {
+                    Text("Merge em andamento: o commit precisa incluir todos os arquivos.")
+                        .font(.system(size: 11))
+                        .foregroundStyle(Theme.waitText)
+                }
+                HStack {
+                    Button(chosen.count == changes.count ? "Desmarcar tudo" : "Marcar tudo") {
+                        unchecked = chosen.count == changes.count ? Set(changes.map(\.id)) : []
+                    }
+                    .buttonStyle(.plain)
+                    .font(.system(size: 11.5))
+                    .foregroundStyle(Theme.faded)
+                    Spacer()
+                    Button {
+                        let paths = chosen
+                        let text = message
+                        Task {
+                            if await model.commit(trama.slug, repo: repo, paths: paths, message: text) {
+                                message = ""
+                                unchecked = []
+                            }
+                        }
+                    } label: {
+                        Text("Commitar \(chosen.count) \(plural(chosen.count, "arquivo", "arquivos"))")
+                    }
+                    .buttonStyle(EmberButton(compact: true))
+                    .disabled(!canCommit)
+                    .opacity(canCommit ? 1 : 0.45)
+                }
+            }
+            .padding(12)
         }
     }
 }
