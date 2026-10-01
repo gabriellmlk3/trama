@@ -52,6 +52,14 @@ final class TerminalStore: NSObject, ObservableObject, LocalProcessTerminalViewD
         expanded = true
     }
 
+    @discardableResult
+    func focus(path: String) -> Bool {
+        guard let session = sessions.first(where: { $0.path == path && $0.running }) else { return false }
+        selectedID = session.id
+        expanded = true
+        return true
+    }
+
     func close(_ id: TerminalSession.ID) {
         guard let session = sessions.first(where: { $0.id == id }) else { return }
         session.view.terminate()

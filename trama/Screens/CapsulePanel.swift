@@ -108,22 +108,28 @@ struct GoalSection: View {
     let trama: LiveTrama
     @State private var editing = false
     @State private var text = ""
+    @State private var achieved = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            HStack {
+            HStack(spacing: 8) {
                 SectionLabel(text: "Objetivo")
                 Spacer()
-                Button {
+                if !capsule.goal.isEmpty {
+                    Button("Atingido") {
+                        achieved = true
+                        text = ""
+                        editing = true
+                    }
+                    .buttonStyle(GhostButton(compact: true))
+                    .help("Registra o objetivo como concluído e define o próximo")
+                }
+                Button(capsule.goal.isEmpty ? "Definir" : "Editar") {
+                    achieved = false
                     text = capsule.goal
                     editing = true
-                } label: {
-                    Image(systemName: "pencil")
-                        .font(.system(size: 11))
-                        .foregroundStyle(Theme.faded)
                 }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Editar objetivo")
+                .buttonStyle(GhostButton(compact: true))
             }
             if !capsule.goal.isEmpty {
                 Text(capsule.goal)
@@ -132,23 +138,48 @@ struct GoalSection: View {
                     .foregroundStyle(Theme.text)
                     .fixedSize(horizontal: false, vertical: true)
                     .textSelection(.enabled)
+                    .onTapGesture(count: 2) {
+                        achieved = false
+                        text = capsule.goal
+                        editing = true
+                    }
             } else {
-                Button("Definir o objetivo desta trama") {
-                    text = ""
-                    editing = true
-                }
-                .buttonStyle(GhostButton(compact: true))
+                Text("Sem objetivo definido.")
+                    .font(.system(size: 12))
+                    .foregroundStyle(Theme.faded)
             }
         }
-        .alert("Objetivo da trama", isPresented: $editing) {
-            TextField("Em uma ou duas frases", text: $text)
-            Button("Salvar") {
-                let t = text
-                Task { await model.annotate(.goal, t, trama: trama.slug) }
+        .sheet(isPresented: $editing) {
+            VStack(alignment: .leading, spacing: 12) {
+                Text(achieved ? "Próximo objetivo" : "Objetivo da trama")
+                    .font(.system(size: 15, weight: .semibold))
+                Text(achieved
+                     ? "O objetivo atual será registrado no diário como atingido."
+                     : "Os agentes leem o objetivo ao abrir uma sessão nesta trama.")
+                    .font(.system(size: 12))
+                    .foregroundStyle(Theme.faded)
+                TextEditor(text: $text)
+                    .font(.system(size: 14))
+                    .frame(minHeight: 110)
+                    .padding(6)
+                    .overlay(RoundedRectangle(cornerRadius: 6).stroke(Theme.line))
+                HStack {
+                    Spacer()
+                    Button("Cancelar") { editing = false }
+                        .keyboardShortcut(.cancelAction)
+                    Button("Salvar") {
+                        let t = text
+                        let previous = capsule.goal
+                        let closing = achieved
+                        editing = false
+                        Task { await model.replaceGoal(t, previous: closing ? previous : nil, trama: trama.slug) }
+                    }
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
             }
-            Button("Cancelar", role: .cancel) {}
-        } message: {
-            Text("Os agentes leem o objetivo ao abrir uma sessão nesta trama.")
+            .padding(20)
+            .frame(width: 440)
         }
     }
 }

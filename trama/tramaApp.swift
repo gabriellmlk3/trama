@@ -81,8 +81,22 @@ struct TramaApp: App {
             MenuBarView()
                 .environmentObject(model)
         } label: {
-            Image("MenuBarIcon")
+            MenuBarLabel()
+                .environmentObject(model)
         }
         .menuBarExtraStyle(.window)
+    }
+}
+
+struct MenuBarLabel: View {
+    @EnvironmentObject var model: AppModel
+
+    var body: some View {
+        HStack(spacing: 3) {
+            Image("MenuBarIcon")
+            if model.waitingCount > 0 {
+                Text("\(model.waitingCount)")
+            }
+        }
     }
 }

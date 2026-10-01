@@ -208,8 +208,12 @@ enum CapsuleDoc {
 }
 
 extension Workspace {
+    public func contextPath(_ slug: String) -> String? {
+        (try? trama(slug))?.context ?? config.context
+    }
+
     public func capsulePath(_ slug: String) -> String {
-        guard let context = config.context else {
+        guard let context = contextPath(slug) else {
             return Paths.join(tramaPath(slug), "CAPSULA.md")
         }
         return Paths.join(context, config.capsuleFolder, slug + ".md")
@@ -296,7 +300,7 @@ extension Workspace {
 
     @discardableResult
     public func syncCapsule(_ slug: String) throws -> Bool {
-        guard let context = config.context else {
+        guard let context = contextPath(slug) else {
             throw TramaError("nenhum repositório de contexto configurado (`trama init --contexto <pasta>`)")
         }
         let path = capsulePath(slug)

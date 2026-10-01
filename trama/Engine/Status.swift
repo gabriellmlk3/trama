@@ -20,6 +20,9 @@ public struct RepoStatus: Codable, Hashable, Identifiable, Sendable {
     public var lastCommit: Commit?
     public var conflict: String?
     public var agents: [Agent] = []
+    public var prep: String?
+    public var prepLog: String?
+    public var services: [ServiceStatus] = []
     public var error: String?
 
     public var id: String { repo }
@@ -53,7 +56,7 @@ public struct LiveTrama: Hashable, Identifiable, Encodable, Sendable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case slug, title = "titulo", branch, base, repos, state = "estado", task = "tarefa"
+        case slug, title = "titulo", branch, base, repos, state = "estado", task = "tarefa", context = "contexto"
         case createdAt = "criadaEm", parkedAt = "estacionadaEm", updatedAt = "atualizadaEm"
         case path = "caminho", capsule = "capsula", status
     }
@@ -67,6 +70,7 @@ public struct LiveTrama: Hashable, Identifiable, Encodable, Sendable {
         try c.encode(trama.repos, forKey: .repos)
         try c.encode(trama.state, forKey: .state)
         try c.encodeIfPresent(trama.task, forKey: .task)
+        try c.encodeIfPresent(trama.context, forKey: .context)
         try c.encode(trama.createdAt, forKey: .createdAt)
         try c.encodeIfPresent(trama.parkedAt, forKey: .parkedAt)
         try c.encode(trama.updatedAt, forKey: .updatedAt)
@@ -94,6 +98,9 @@ extension Workspace {
             return s
         }
         s.exists = true
+        s.prep = prepState(t.slug, r.name)
+        if s.prep != nil { s.prepLog = prepLogPath(t.slug, r.name) }
+        s.services = serviceStatuses(t, r)
         let ref = Git.baseRef(wt, s.base)
         do {
             let ab = try Git.aheadBehind(wt, ref)
@@ -161,6 +168,7 @@ extension Workspace {
     }
 
     public func fullState(includeArchived: Bool = false) throws -> OverallState {
+        assignMissingPortIndexes()
         let ts = try tramas().filter { includeArchived || !$0.isArchived }
         let ags = (try? agents()) ?? []
         var live = [LiveTrama?](repeating: nil, count: ts.count)

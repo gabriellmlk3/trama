@@ -187,3 +187,34 @@ extension Workspace {
         return String(decoding: data, as: UTF8.self)
     }
 }
+
+public enum AgentAlert: Sendable {
+    case waiting, done
+}
+
+public struct AgentTransition: Hashable, Sendable {
+    public var agent: Agent
+    public var alert: AgentAlert
+
+    public static func == (a: AgentTransition, b: AgentTransition) -> Bool {
+        a.agent == b.agent
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(agent)
+    }
+}
+
+public func agentTransitions(from previous: [Agent], to current: [Agent]) -> [AgentTransition] {
+    let before = Dictionary(previous.map { ($0.session, $0.state) }, uniquingKeysWith: { _, last in last })
+    return current.compactMap { agent in
+        let old = before[agent.session]
+        if agent.isWaiting, old != AgentState.waiting {
+            return AgentTransition(agent: agent, alert: .waiting)
+        }
+        if agent.isDone, let old, old != AgentState.done {
+            return AgentTransition(agent: agent, alert: .done)
+        }
+        return nil
+    }
+}

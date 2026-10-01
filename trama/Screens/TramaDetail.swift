@@ -62,6 +62,8 @@ struct TramaHeader: View {
     @EnvironmentObject var model: AppModel
     let trama: LiveTrama
     @State private var confirmingArchive = false
+    @State private var confirmingPRs = false
+    @State private var mergeSource: LiveTrama?
 
     var base: String {
         if let b = trama.base, !b.isEmpty { return b }
@@ -102,10 +104,30 @@ struct TramaHeader: View {
                 Menu {
                     Button("Mostrar pasta no Finder") { Terminal.reveal(trama.path) }
                     Button("Copiar nome da branch") { Terminal.copy(trama.branch) }
-                    if model.state?.context != nil {
+                    if trama.context != nil || model.state?.context != nil {
                         Button("Commitar cápsula no contexto") { Task { await model.sync(trama.slug) } }
                     }
+                    Button("Repositório de contexto desta trama…") {
+                        if let folder = Terminal.choosePaths(multiple: false, title: "Repositório de contexto de \(trama.title)").first {
+                            Task { await model.setTramaContext(trama.slug, folder) }
+                        }
+                    }
+                    if trama.context != nil {
+                        Button("Usar o contexto padrão") { Task { await model.setTramaContext(trama.slug, nil) } }
+                    }
                     Divider()
+                    if trama.isActive {
+                        Menu("Trazer commits de outra trama") {
+                            ForEach(model.visibleTramas.filter { $0.slug != trama.slug }) { other in
+                                let shared = trama.repos.filter { other.repos.contains($0) }
+                                Button("\(other.title) · \(shared.isEmpty ? "sem repositório em comum" : model.aliases(shared).joined(separator: ", "))") {
+                                    mergeSource = other
+                                }
+                                .disabled(shared.isEmpty)
+                            }
+                        }
+                        .disabled(model.visibleTramas.count < 2)
+                    }
                     Button("Arquivar trama…") { confirmingArchive = true }
                 } label: {
                     Image(systemName: "ellipsis")
@@ -139,6 +161,13 @@ struct TramaHeader: View {
                     }
                     .buttonStyle(GhostButton())
                     Button {
+                        confirmingPRs = true
+                    } label: {
+                        Label(trama.trama.prs.isEmpty ? "Abrir PRs" : "Atualizar PRs", systemImage: "arrow.triangle.pull")
+                    }
+                    .buttonStyle(GhostButton())
+                    .help("Envia as branches e abre (ou atualiza) um PR por repositório, ligados entre si")
+                    Button {
                         model.openClaudeInAll(trama)
                     } label: {
                         Label("Abrir no Claude", systemImage: "sparkle")
@@ -151,6 +180,24 @@ struct TramaHeader: View {
         .padding(.horizontal, 28)
         .padding(.top, 26)
         .padding(.bottom, 18)
+        .alert("Trazer “\(mergeSource?.title ?? "")” para cá?", isPresented: Binding(get: { mergeSource != nil }, set: { if !$0 { mergeSource = nil } })) {
+            Button("Fazer merge") {
+                if let source = mergeSource { Task { await model.merge(source, into: trama) } }
+                mergeSource = nil
+            }
+            Button("Cancelar", role: .cancel) { mergeSource = nil }
+        } message: {
+            if let source = mergeSource {
+                Text("Faz merge da branch \(source.branch) em \(trama.branch), nos repositórios que as duas têm. Se algum worktree daqui tiver mudanças não commitadas ou o merge previr conflito, nada é mesclado.")
+            }
+        }
+        .confirmationDialog("Abrir PRs de “\(trama.title)”?", isPresented: $confirmingPRs) {
+            Button("Abrir PRs") { Task { await model.openPullRequests(trama.slug, draft: false) } }
+            Button("Abrir como rascunho") { Task { await model.openPullRequests(trama.slug, draft: true) } }
+            Button("Cancelar", role: .cancel) {}
+        } message: {
+            Text("Envia a branch \(trama.branch) de cada repositório com commits novos para o remoto e abre um PR em cada um, com links cruzados.")
+        }
         .alert("Arquivar “\(trama.title)”?", isPresented: $confirmingArchive) {
             Button("Arquivar", role: .destructive) { Task { await model.archive(trama.slug) } }
             Button("Cancelar", role: .cancel) {}
@@ -172,12 +219,19 @@ struct LoomView: View {
         let columns = model.visibleTramas
         VStack(spacing: 0) {
             LoomHeader(columns: columns, selected: selected)
-            ForEach(model.repos) { repo in
-                LoomRow(repo: repo, columns: columns, selected: selected)
+            let hasContext = !(model.state?.context ?? "").isEmpty
+            let count = model.repos.count
+            ScrollView {
+                VStack(spacing: 0) {
+                    ForEach(Array(model.repos.enumerated()), id: \.element.id) { index, repo in
+                        LoomRow(repo: repo, columns: columns, selected: selected, rank: count - 1 - index + (hasContext ? 1 : 0))
+                    }
+                    if let context = model.state?.context, !context.isEmpty {
+                        ContextRow(context: context, columns: columns, selected: selected)
+                    }
+                }
             }
-            if let context = model.state?.context, !context.isEmpty {
-                ContextRow(context: context, columns: columns, selected: selected)
-            }
+            .scrollIndicators(.automatic)
         }
         .background(Theme.loom)
         .clipShape(RoundedRectangle(cornerRadius: 14))
@@ -229,6 +283,7 @@ struct LoomRow: View {
     let repo: RepoConfig
     let columns: [LiveTrama]
     let selected: LiveTrama
+    let rank: Int
 
     var inside: Bool { selected.repos.contains(repo.name) }
 
@@ -251,7 +306,9 @@ struct LoomRow: View {
                 LoomCell(
                     type: t.repos.contains(repo.name) ? .inside : .outside,
                     selected: t.slug == selected.slug,
-                    parked: t.isParked
+                    parked: t.isParked,
+                    rank: rank,
+                    agent: t.status(for: repo.name)?.primaryAgent
                 )
             }
             RepoDetail(repo: repo, trama: selected)
@@ -269,36 +326,49 @@ struct LoomCell: View {
     let type: CellType
     let selected: Bool
     let parked: Bool
+    var rank = 0
+    var agent: Agent?
+
+    private var climb: Animation {
+        selected
+            ? .spring(response: 0.45, dampingFraction: 0.72).delay(Double(rank) * 0.1)
+            : .easeOut(duration: 0.18)
+    }
 
     var body: some View {
         ZStack {
             VerticalThread(selected: selected, parked: parked)
             node
+            if type == .inside, let agent, agent.isWorking || agent.isWaiting {
+                PulseRing(color: agent.isWaiting ? Theme.wait : Theme.iris, size: selected ? 14 : 10)
+            }
         }
         .frame(width: columnWidth)
         .frame(maxHeight: .infinity)
+        .animation(climb, value: selected)
+        .animation(climb, value: type)
     }
 
     @ViewBuilder var node: some View {
         switch type {
         case .inside:
-            if selected {
-                Circle()
-                    .fill(Theme.ember)
-                    .frame(width: 14, height: 14)
-                    .background(Circle().fill(Theme.ember.opacity(0.16)).frame(width: 22, height: 22))
-                    .shadow(color: Theme.ember.opacity(0.55), radius: 8)
-            } else if parked {
-                Circle()
-                    .fill(Theme.loom)
-                    .frame(width: 10, height: 10)
-                    .overlay(Circle().strokeBorder(Theme.faded, style: StrokeStyle(lineWidth: 1.5, dash: [2, 2])))
-            } else {
-                Circle()
-                    .fill(Theme.loom)
-                    .frame(width: 10, height: 10)
-                    .overlay(Circle().strokeBorder(Theme.ring, lineWidth: 2))
-            }
+            let size: CGFloat = selected ? 14 : 10
+            Circle()
+                .fill(selected ? Theme.ember : Theme.loom)
+                .frame(width: size, height: size)
+                .background(
+                    Circle()
+                        .fill(Theme.ember.opacity(0.16))
+                        .frame(width: 22, height: 22)
+                        .scaleEffect(selected ? 1 : 0.4)
+                        .opacity(selected ? 1 : 0)
+                )
+                .overlay(
+                    Circle()
+                        .strokeBorder(parked ? Theme.faded : Theme.ring, style: StrokeStyle(lineWidth: parked ? 1.5 : 2, dash: parked ? [2, 2] : []))
+                        .opacity(selected ? 0 : 1)
+                )
+                .shadow(color: Theme.ember.opacity(selected ? 0.55 : 0), radius: 8)
         case .outside:
             Rectangle()
                 .fill(Theme.loom)
@@ -321,29 +391,52 @@ struct LoomCell: View {
     }
 }
 
+struct PulseRing: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    let color: Color
+    let size: CGFloat
+    @State private var expanded = false
+
+    var body: some View {
+        Circle()
+            .stroke(color, lineWidth: 1.5)
+            .frame(width: size, height: size)
+            .scaleEffect(expanded ? 2.4 : 1)
+            .opacity(expanded ? 0 : 0.8)
+            .allowsHitTesting(false)
+            .onAppear {
+                guard !reduceMotion else { return }
+                withAnimation(.easeOut(duration: 1.6).repeatForever(autoreverses: false)) { expanded = true }
+            }
+    }
+}
+
 struct VerticalThread: View {
     let selected: Bool
     let parked: Bool
 
     var body: some View {
-        if selected {
+        ZStack {
+            if parked {
+                GeometryReader { g in
+                    Path { p in
+                        p.move(to: CGPoint(x: g.size.width / 2, y: 0))
+                        p.addLine(to: CGPoint(x: g.size.width / 2, y: g.size.height))
+                    }
+                    .stroke(Theme.thread, style: StrokeStyle(lineWidth: 1, dash: [3, 3]))
+                }
+                .frame(width: 2)
+            } else {
+                Rectangle()
+                    .fill(Theme.thread)
+                    .frame(width: 1)
+            }
             Rectangle()
                 .fill(Theme.ember)
                 .frame(width: 2)
                 .shadow(color: Theme.ember.opacity(0.5), radius: 6)
-        } else if parked {
-            GeometryReader { g in
-                Path { p in
-                    p.move(to: CGPoint(x: g.size.width / 2, y: 0))
-                    p.addLine(to: CGPoint(x: g.size.width / 2, y: g.size.height))
-                }
-                .stroke(Theme.thread, style: StrokeStyle(lineWidth: 1, dash: [3, 3]))
-            }
-            .frame(width: 2)
-        } else {
-            Rectangle()
-                .fill(Theme.thread)
-                .frame(width: 1)
+                .scaleEffect(y: selected ? 1 : 0, anchor: .bottom)
+                .opacity(selected ? 1 : 0)
         }
     }
 }
@@ -401,6 +494,9 @@ struct InsideDetail: View {
             VStack(alignment: .leading, spacing: 6) {
                 SyncRow(status: status)
                 AgentRow(status: status)
+                PrepRow(repo: repo, trama: trama, status: status)
+                ServicesRow(repo: repo, trama: trama, status: status)
+                PullRequestRow(repo: repo, trama: trama)
             }
             Spacer(minLength: 8)
             HStack(spacing: 6) {
@@ -475,6 +571,153 @@ struct SyncRow: View {
         .font(.system(size: 12))
         .foregroundStyle(Theme.faded)
         .lineLimit(1)
+    }
+}
+
+struct PrepRow: View {
+    @EnvironmentObject var model: AppModel
+    let repo: RepoConfig
+    let trama: LiveTrama
+    let status: RepoStatus
+
+    var body: some View {
+        if let prep = status.prep {
+            HStack(spacing: 8) {
+                switch prep {
+                case PrepState.running:
+                    ProgressView().controlSize(.mini)
+                    Text("Preparando o ambiente…")
+                        .foregroundStyle(Theme.irisText)
+                case PrepState.failed:
+                    Image(systemName: "xmark.circle")
+                        .foregroundStyle(Theme.waitText)
+                    Text("Preparo falhou")
+                        .foregroundStyle(Theme.waitText)
+                default:
+                    Image(systemName: "checkmark")
+                        .foregroundStyle(Theme.okText)
+                    Text("Ambiente pronto")
+                        .foregroundStyle(Theme.okText)
+                }
+                if let log = status.prepLog {
+                    Button("log") { Terminal.openFile(log) }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(Theme.text3)
+                }
+                if prep == PrepState.failed, trama.isActive {
+                    Button("tentar de novo") { Task { await model.prepare(trama.slug, repo.name) } }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(Theme.text3)
+                }
+            }
+            .font(.system(size: 12.5))
+            .lineLimit(1)
+        }
+    }
+}
+
+struct ServicesRow: View {
+    @EnvironmentObject var model: AppModel
+    let repo: RepoConfig
+    let trama: LiveTrama
+    let status: RepoStatus
+
+    var body: some View {
+        if !status.services.isEmpty {
+            let anyRunning = status.services.contains { $0.running }
+            HStack(spacing: 10) {
+                ForEach(status.services) { s in
+                    HStack(spacing: 6) {
+                        Dot(color: s.running ? Theme.ok : Theme.faded, halo: s.running)
+                        if s.running {
+                            Button(s.name + " · :" + String(s.port)) {
+                                if let url = URL(string: s.url) { NSWorkspace.shared.open(url) }
+                            }
+                            .buttonStyle(.plain)
+                            .foregroundStyle(Theme.okText)
+                            .help("Abrir \(s.url)")
+                            Button("log") { Terminal.openFile(s.log) }
+                                .buttonStyle(.plain)
+                                .foregroundStyle(Theme.text3)
+                        } else {
+                            Text(s.name + " · :" + String(s.port))
+                                .foregroundStyle(Theme.faded)
+                        }
+                    }
+                }
+                if trama.isActive {
+                    Button(anyRunning ? "descer" : "subir") {
+                        Task {
+                            if anyRunning {
+                                await model.stopServices(trama.slug, repo: repo.name)
+                            } else {
+                                await model.startServices(trama.slug, repo: repo.name)
+                            }
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(Theme.text3)
+                    .help(anyRunning ? "Derruba os serviços de \(repo.name) nesta trama" : "Sobe os serviços de \(repo.name) nas portas desta trama")
+                }
+            }
+            .font(.system(size: 12.5))
+            .lineLimit(1)
+        }
+    }
+}
+
+struct PullRequestRow: View {
+    @EnvironmentObject var model: AppModel
+    let repo: RepoConfig
+    let trama: LiveTrama
+
+    var body: some View {
+        if let url = trama.trama.prs[repo.name] {
+            let info = model.pullRequests[trama.slug]?.first { $0.repo == repo.name }
+            HStack(spacing: 8) {
+                Image(systemName: "arrow.triangle.pull")
+                    .foregroundStyle(stateColor(info))
+                Button(label(info)) {
+                    if let u = URL(string: url) { NSWorkspace.shared.open(u) }
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(stateColor(info))
+                .help(url)
+                if let info, info.state == "open" {
+                    switch info.ci {
+                    case CIState.success:
+                        Label("CI ok", systemImage: "checkmark").foregroundStyle(Theme.okText)
+                    case CIState.failure:
+                        Label("CI falhou", systemImage: "xmark").foregroundStyle(Theme.waitText)
+                    case CIState.pending:
+                        Label("CI rodando", systemImage: "clock").foregroundStyle(Theme.irisText)
+                    default:
+                        EmptyView()
+                    }
+                }
+            }
+            .font(.system(size: 12.5))
+            .lineLimit(1)
+        }
+    }
+
+    func label(_ info: PullRequestInfo?) -> String {
+        guard let info, info.number > 0 else { return "PR aberto" }
+        let state: String
+        switch info.state {
+        case "merged": state = "mesclado"
+        case "closed": state = "fechado"
+        default: state = info.draft ? "rascunho" : "aberto"
+        }
+        return "PR #\(info.number) · \(state)"
+    }
+
+    func stateColor(_ info: PullRequestInfo?) -> Color {
+        switch info?.state {
+        case "merged": return Theme.irisText
+        case "closed": return Theme.faded
+        default: return Theme.text3
+        }
     }
 }
 

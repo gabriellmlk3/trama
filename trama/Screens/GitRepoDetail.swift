@@ -256,6 +256,7 @@ struct WorktreesCard: View {
     let overview: GitOverview
     let repo: RepoConfig
     let trama: LiveTrama
+    @State private var pending: (from: WorktreeSummary, into: WorktreeSummary)?
 
     func title(_ w: WorktreeSummary) -> String {
         if w.isPrimary { return "Cópia principal" }
@@ -304,6 +305,20 @@ struct WorktreesCard: View {
                             Text(trailing(w))
                                 .font(.system(size: 12))
                                 .foregroundStyle(w.changed > 0 ? Theme.text3 : Theme.faded)
+                            if !current(w), !w.branch.isEmpty, let mine = overview.worktrees.first(where: current), !mine.branch.isEmpty {
+                                Menu {
+                                    Button("Mesclar \(mine.branch) em \(w.branch)") { pending = (mine, w) }
+                                    Button("Trazer \(w.branch) para \(mine.branch)") { pending = (w, mine) }
+                                } label: {
+                                    Image(systemName: "arrow.triangle.merge")
+                                }
+                                .menuStyle(.button)
+                                .buttonStyle(.plain)
+                                .menuIndicator(.hidden)
+                                .frame(width: 22)
+                                .foregroundStyle(Theme.text3)
+                                .help("Fazer merge entre este worktree e \(title(w))")
+                            }
                         }
                         .padding(.horizontal, 10)
                         .padding(.vertical, 8)
@@ -320,6 +335,19 @@ struct WorktreesCard: View {
                 }
             }
             .padding(14)
+        }
+        .alert("Fazer merge?", isPresented: Binding(get: { pending != nil }, set: { if !$0 { pending = nil } })) {
+            Button("Fazer merge") {
+                if let p = pending {
+                    Task { await model.mergeWorktree(repo.name, from: p.from.path, into: p.into.path, label: title(p.into)) }
+                }
+                pending = nil
+            }
+            Button("Cancelar", role: .cancel) { pending = nil }
+        } message: {
+            if let p = pending {
+                Text("Mescla \(p.from.branch) em \(p.into.branch) (\(title(p.into))). Se o merge previr conflito, nada é mesclado." + (p.into.changed > 0 ? " Esse worktree tem \(p.into.changed) \(plural(p.into.changed, "alteração", "alterações")) não commitada(s): o Git só recusa se elas tocarem os mesmos arquivos." : ""))
+            }
         }
     }
 }

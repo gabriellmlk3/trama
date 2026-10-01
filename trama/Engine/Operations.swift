@@ -7,16 +7,18 @@ public struct NewTramaOptions: Sendable {
     public var base: String?
     public var task: String?
     public var goal: String?
+    public var context: String?
     public var noFetch = false
 
     public init(title: String, repos: [String], slug: String? = nil, base: String? = nil,
-                task: String? = nil, goal: String? = nil, noFetch: Bool = false) {
+                task: String? = nil, goal: String? = nil, context: String? = nil, noFetch: Bool = false) {
         self.title = title
         self.repos = repos
         self.slug = slug
         self.base = base
         self.task = task
         self.goal = goal
+        self.context = context
         self.noFetch = noFetch
     }
 }
@@ -99,6 +101,7 @@ extension Workspace {
             throw TramaError("não consegui gerar um identificador para esse nome · use --slug")
         }
         let repos = try resolveRepos(o.repos)
+        let context = try nilIfEmpty(o.context).map(validContext)
         if let t = try tramas().first(where: { $0.slug == slug }) {
             throw TramaError("já existe uma trama “\(slug)” (\(t.state)) · escolha outro nome ou use --slug")
         }
@@ -112,6 +115,8 @@ extension Workspace {
             task: nilIfEmpty(o.task),
             createdAt: nowUnix()
         )
+        t.context = context
+        t.portIndex = Workspace.nextPortIndex(try tramas())
         try FileManager.default.createDirectory(atPath: tramaPath(slug), withIntermediateDirectories: true)
         var warnings: [Warning] = []
         var created: [(RepoConfig, Bool)] = []
@@ -157,6 +162,9 @@ extension Workspace {
         } catch {
             warnings.append(Warning(message: "não consegui escrever o CLAUDE.md da trama: \(errorMessage(error))"))
         }
+        for r in repos {
+            warnings += startPreparation(t, r)
+        }
         return (t, warnings)
     }
 
@@ -168,6 +176,35 @@ extension Workspace {
             try setGoal(t.slug, goal)
         }
         try addJournal(t.slug, "trama criada com \(t.repos.joined(separator: ", "))")
+    }
+
+    func validContext(_ path: String) throws -> String {
+        let c = Paths.absolute(path)
+        guard Paths.isDirectory(c) else {
+            throw TramaError("pasta de contexto não encontrada: \(c)")
+        }
+        return c
+    }
+
+    public func setTramaContext(_ slug: String, _ path: String?) throws -> Trama {
+        let current = try trama(slug)
+        guard !current.isArchived else { throw TramaError("essa trama está arquivada") }
+        let newContext = try nilIfEmpty(path).map(validContext)
+        let from = capsulePath(current.slug)
+        let link = Paths.join(tramaPath(current.slug), "CAPSULA.md")
+        if (try? FileManager.default.destinationOfSymbolicLink(atPath: link)) != nil {
+            try? FileManager.default.removeItem(atPath: link)
+        }
+        let updated = try updateTrama(current.slug) { $0.context = newContext }
+        let to = capsulePath(updated.slug)
+        if from != to, Paths.exists(from), !Paths.exists(to) {
+            try FileManager.default.createDirectory(atPath: (to as NSString).deletingLastPathComponent, withIntermediateDirectories: true)
+            try FileManager.default.moveItem(atPath: from, toPath: to)
+        }
+        try? writeInstructions(updated)
+        let destination = newContext.map { Paths.abbreviate($0) } ?? "o padrão global"
+        try? addJournal(updated.slug, "repositório de contexto: \(destination)")
+        return updated
     }
 
     public func writeInstructions(_ t: Trama) throws {
@@ -196,7 +233,7 @@ extension Workspace {
         b += "- Ao terminar uma etapa, deixe na cápsula o que o próximo agente precisa saber.\n"
         let dir = tramaPath(t.slug)
         try File.write(b, to: Paths.join(dir, "CLAUDE.md"))
-        if config.context != nil {
+        if contextPath(t.slug) != nil {
             let link = Paths.join(dir, "CAPSULA.md")
             if (try? FileManager.default.attributesOfItem(atPath: link)) == nil,
                (try? FileManager.default.destinationOfSymbolicLink(atPath: link)) == nil {
@@ -233,6 +270,9 @@ extension Workspace {
         }
         try? writeInstructions(t)
         try? addJournal(t.slug, "puxou \(added.joined(separator: ", ")) para a trama")
+        for r in repos where added.contains(r.name) {
+            warnings += startPreparation(t, r)
+        }
         return (t, warnings)
     }
 
@@ -252,6 +292,9 @@ extension Workspace {
             }
             try Git.run(r.path, ["worktree", "remove"] + (force ? ["--force"] : []) + [wt])
         }
+        stopServices(t.slug, repo: r.name)
+        clearServiceLogs(t.slug, [r.name])
+        clearPreparation(t.slug, [r.name])
         let updated = try updateTrama(t.slug) { x in
             x.repos.removeAll { $0 == r.name }
         }
@@ -264,6 +307,7 @@ extension Workspace {
         let t = try trama(slug)
         guard !t.isArchived else { throw TramaError("essa trama está arquivada") }
         let status = tramaStatus(t, predictConflict: false)
+        stopServices(t.slug)
         let updated = try updateTrama(t.slug) { x in
             x.state = TramaState.parked
             x.parkedAt = nowUnix()
@@ -341,10 +385,13 @@ extension Workspace {
             guard Paths.exists(wt) else { continue }
             try Git.run(r.path, ["worktree", "remove"] + (force ? ["--force"] : []) + [wt])
         }
+        stopServices(t.slug)
+        clearServiceLogs(t.slug, t.repos)
+        clearPreparation(t.slug, t.repos)
         let dir = tramaPath(t.slug)
         let fm = FileManager.default
         try? fm.removeItem(atPath: Paths.join(dir, "CLAUDE.md"))
-        if config.context != nil {
+        if contextPath(t.slug) != nil {
             try? fm.removeItem(atPath: Paths.join(dir, "CAPSULA.md"))
             if (try? fm.contentsOfDirectory(atPath: dir))?.filter({ $0 != ".DS_Store" }).isEmpty == true {
                 try? fm.removeItem(atPath: dir)

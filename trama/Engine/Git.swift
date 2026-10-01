@@ -19,7 +19,7 @@ struct GitResult {
     var code: Int32
 }
 
-private final class Box {
+final class Box {
     var data = Data()
 }
 

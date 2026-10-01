@@ -11,9 +11,14 @@ public struct RepoConfig: Codable, Hashable, Identifiable, Sendable {
     public var path: String
     public var label: String?
     public var base: String?
+    public var copy: [String] = []
+    public var run: [String] = []
+    public var services: [ServiceConfig] = []
+    public var mergeRank = 0
 
     enum CodingKeys: String, CodingKey {
-        case name = "nome", alias = "apelido", path = "caminho", label = "rotulo", base
+        case name = "nome", alias = "apelido", path = "caminho", label = "rotulo", base, copy = "copiar", run = "rodar"
+        case services = "servicos", mergeRank = "ordemMerge"
     }
 
     public var id: String { name }
@@ -21,6 +26,21 @@ public struct RepoConfig: Codable, Hashable, Identifiable, Sendable {
     public var summary: String {
         if let r = label, !r.isEmpty { return r }
         return alias
+    }
+}
+
+extension RepoConfig {
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        name = try c.decode(String.self, forKey: .name)
+        alias = try c.decode(String.self, forKey: .alias)
+        path = try c.decode(String.self, forKey: .path)
+        label = try c.decodeIfPresent(String.self, forKey: .label)
+        base = try c.decodeIfPresent(String.self, forKey: .base)
+        copy = try c.decodeIfPresent([String].self, forKey: .copy) ?? []
+        run = try c.decodeIfPresent([String].self, forKey: .run) ?? []
+        services = try c.decodeIfPresent([ServiceConfig].self, forKey: .services) ?? []
+        mergeRank = try c.decodeIfPresent(Int.self, forKey: .mergeRank) ?? 0
     }
 }
 
@@ -68,6 +88,9 @@ public struct Trama: Codable, Hashable, Identifiable, Sendable {
     public var repos: [String]
     public var state: String
     public var task: String?
+    public var context: String?
+    public var portIndex: Int?
+    public var prs: [String: String] = [:]
     public var createdAt: Int64
     public var parkedAt: Int64?
     public var updatedAt: Int64
@@ -78,8 +101,8 @@ public struct Trama: Codable, Hashable, Identifiable, Sendable {
     public var isArchived: Bool { state == TramaState.archived }
 
     enum CodingKeys: String, CodingKey {
-        case slug, title = "titulo", branch, base, repos, state = "estado", task = "tarefa"
-        case createdAt = "criadaEm", parkedAt = "estacionadaEm", updatedAt = "atualizadaEm"
+        case slug, title = "titulo", branch, base, repos, state = "estado", task = "tarefa", context = "contexto"
+        case portIndex = "indicePorta", prs, createdAt = "criadaEm", parkedAt = "estacionadaEm", updatedAt = "atualizadaEm"
     }
 
     init(slug: String, title: String, branch: String, base: String?, repos: [String], state: String, task: String?, createdAt: Int64) {
@@ -104,11 +127,15 @@ public struct Trama: Codable, Hashable, Identifiable, Sendable {
         repos = try c.decodeIfPresent([String].self, forKey: .repos) ?? []
         state = try c.decodeIfPresent(String.self, forKey: .state) ?? TramaState.active
         task = try c.decodeIfPresent(String.self, forKey: .task)
+        context = try c.decodeIfPresent(String.self, forKey: .context)
+        portIndex = try c.decodeIfPresent(Int.self, forKey: .portIndex)
+        prs = try c.decodeIfPresent([String: String].self, forKey: .prs) ?? [:]
         createdAt = try c.decodeIfPresent(Int64.self, forKey: .createdAt) ?? 0
         parkedAt = try c.decodeIfPresent(Int64.self, forKey: .parkedAt)
         updatedAt = try c.decodeIfPresent(Int64.self, forKey: .updatedAt) ?? createdAt
         if base?.isEmpty == true { base = nil }
         if task?.isEmpty == true { task = nil }
+        if context?.isEmpty == true { context = nil }
         if parkedAt == 0 { parkedAt = nil }
     }
 }
@@ -202,6 +229,12 @@ public final class Workspace {
         try File.write(data + Data("\n".utf8), to: configPath)
     }
 
+    func replaceRepo(_ r: RepoConfig) throws {
+        guard let i = config.repos.firstIndex(where: { $0.name == r.name }) else { return }
+        config.repos[i] = r
+        try saveConfig()
+    }
+
     public func setDefaultBranch(_ branch: String) throws {
         let b = branch.trimmingCharacters(in: .whitespaces)
         guard !b.isEmpty else { throw TramaError("informe o nome da branch") }
@@ -257,12 +290,15 @@ public final class Workspace {
             finalAlias = name
         }
         let finalBase = (base?.isEmpty == false ? base! : Git.probableBase(topPath))
+        let suggestion = RecipeSuggestion.forRepo(topPath)
         let r = RepoConfig(
             name: name,
             alias: finalAlias,
             path: topPath,
             label: label?.isEmpty == false ? label : nil,
-            base: finalBase
+            base: finalBase,
+            copy: suggestion.copy,
+            run: suggestion.run
         )
         config.repos.append(r)
         config.repos.sort { $0.name < $1.name }

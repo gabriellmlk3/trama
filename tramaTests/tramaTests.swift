@@ -408,6 +408,38 @@ final class FlowTests: XCTestCase {
         XCTAssertTrue(try w.readCapsule(t.slug).exists, "a cápsula fica no repositório de contexto")
     }
 
+    func testContextPerTrama() throws {
+        let w = try lab.workspace()
+        try lab.newRepo("outro-contexto")
+        let other = lab.repos["outro-contexto"]!
+        let global = lab.repos["rebocs-context"]!
+
+        let (a, _) = try w.newTrama(NewTramaOptions(title: "Global", repos: ["api"], noFetch: true))
+        let (b, _) = try w.newTrama(NewTramaOptions(title: "Outro projeto", repos: ["api"], context: other, noFetch: true))
+        XCTAssertNil(a.context)
+        XCTAssertEqual(b.context, other)
+        XCTAssertTrue(w.capsulePath(a.slug).hasPrefix(global))
+        XCTAssertTrue(w.capsulePath(b.slug).hasPrefix(other))
+        XCTAssertTrue(try w.readCapsule(b.slug).exists)
+
+        XCTAssertThrowsError(try w.newTrama(NewTramaOptions(title: "Quebrada", repos: ["api"], context: lab.root + "/nao-existe", noFetch: true)))
+
+        try w.addDecision(a.slug, author: "você", "vai junto")
+        let moved = try w.setTramaContext(a.slug, other)
+        XCTAssertEqual(moved.context, other)
+        XCTAssertTrue(w.capsulePath(a.slug).hasPrefix(other))
+        XCTAssertEqual(try w.readCapsule(a.slug).decisions.count, 1, "a cápsula acompanha a troca")
+        XCTAssertFalse(Paths.exists(global + "/tramas/" + a.slug + ".md"))
+
+        let back = try w.setTramaContext(a.slug, nil)
+        XCTAssertNil(back.context)
+        XCTAssertTrue(w.capsulePath(a.slug).hasPrefix(global))
+        XCTAssertEqual(try w.readCapsule(a.slug).decisions.count, 1)
+
+        XCTAssertTrue(try w.syncCapsule(b.slug))
+        XCTAssertFalse(try lab.git(other, "log", "-1", "--format=%s").isEmpty)
+    }
+
     func testWithoutContextRepo() throws {
         let w = try lab.workspace(withContext: false)
         let (t, _) = try w.newTrama(NewTramaOptions(title: "Solo", repos: ["api"], noFetch: true))
@@ -417,6 +449,200 @@ final class FlowTests: XCTestCase {
         let c = try w.readCapsule(t.slug)
         XCTAssertTrue(c.exists, "sem contexto, a cápsula sobrevive ao arquivamento")
         XCTAssertEqual(c.decisions.count, 1)
+    }
+
+    func testRecipeSuggestionOnRegistration() throws {
+        let dir = try lab.newRepo("suggest-web")
+        try lab.write(dir + "/.env", "A=1\n")
+        try lab.write(dir + "/.env.example", "A=\n")
+        try lab.write(dir + "/package-lock.json", "{}\n")
+        let w = try lab.workspace()
+        let r = try w.addRepo(dir)
+        XCTAssertEqual(r.recipe, Recipe(copy: [".env*"], run: ["npm ci"]))
+        XCTAssertEqual(try Workspace.open(root: w.root).repo("suggest-web").recipe, r.recipe)
+    }
+
+    func testRecipeCopiesFilesAndRunsCommands() throws {
+        let w = try lab.workspace()
+        let api = lab.repos["rebocs_api"]!
+        try lab.write(api + "/.env", "SECRET=1\n")
+        try lab.write(api + "/config/.env.local", "LOCAL=1\n")
+        try w.setRecipe("api", copy: [".env*", "config/.env*"], run: ["echo ok > prepared.txt"])
+        XCTAssertThrowsError(try w.setRecipe("api", copy: ["../fora"], run: []))
+        let (t, warnings) = try w.newTrama(NewTramaOptions(title: "Preparada", repos: ["api", "admin"], noFetch: true))
+        XCTAssertTrue(warnings.isEmpty)
+        let wt = w.worktreePath(t.slug, "rebocs_api")
+        XCTAssertEqual(try File.read(wt + "/.env"), "SECRET=1\n")
+        XCTAssertEqual(try File.read(wt + "/config/.env.local"), "LOCAL=1\n")
+        let deadline = Date().addingTimeInterval(20)
+        while w.prepState(t.slug, "rebocs_api") == PrepState.running, Date() < deadline {
+            Thread.sleep(forTimeInterval: 0.1)
+        }
+        XCTAssertEqual(w.prepState(t.slug, "rebocs_api"), PrepState.ready)
+        XCTAssertEqual(try File.read(wt + "/prepared.txt"), "ok\n")
+        XCTAssertNil(w.prepState(t.slug, "rebocs-admin"))
+        let status = w.repoStatus(t, try w.repo("api"), predictConflict: false)
+        XCTAssertEqual(status.prep, PrepState.ready)
+        XCTAssertTrue(try File.read(w.prepLogPath(t.slug, "rebocs_api"))?.contains("copiado: .env") == true)
+    }
+
+    func testRecipeFailureIsReported() throws {
+        let w = try lab.workspace()
+        try w.setRecipe("api", copy: [], run: ["echo antes", "exit 3", "echo depois"])
+        let (t, _) = try w.newTrama(NewTramaOptions(title: "Falha", repos: ["api"], noFetch: true))
+        let deadline = Date().addingTimeInterval(20)
+        while w.prepState(t.slug, "rebocs_api") == PrepState.running, Date() < deadline {
+            Thread.sleep(forTimeInterval: 0.1)
+        }
+        XCTAssertEqual(w.prepState(t.slug, "rebocs_api"), PrepState.failed)
+        let log = try File.read(w.prepLogPath(t.slug, "rebocs_api")) ?? ""
+        XCTAssertTrue(log.contains("antes"))
+        XCTAssertFalse(log.contains("depois"))
+        _ = try w.archive(t.slug)
+        XCTAssertNil(w.prepState(t.slug, "rebocs_api"))
+    }
+
+    func testPortsPerTramaAndServiceLifecycle() throws {
+        let w = try lab.workspace()
+        try w.setServices("api", [ServiceConfig(name: "dev", command: "echo $PORT $TRAMA_PORTA_BASE > ports.txt; exec sleep 60", port: 3100)])
+        XCTAssertThrowsError(try w.setServices("api", [ServiceConfig(name: "x y", command: "a", port: 3000)]))
+        let (a, _) = try w.newTrama(NewTramaOptions(title: "Porta A", repos: ["api"], noFetch: true))
+        let (b, _) = try w.newTrama(NewTramaOptions(title: "Porta B", repos: ["api"], noFetch: true))
+        XCTAssertEqual([a.portIndex, b.portIndex], [0, 1])
+        let r = try w.repo("api")
+        let service = r.services[0]
+        XCTAssertEqual(w.servicePort(a, service), 3100)
+        XCTAssertEqual(w.servicePort(b, service), 3110)
+        defer {
+            w.stopServices(a.slug)
+            w.stopServices(b.slug)
+        }
+        XCTAssertEqual(try w.startServices(a.slug).map(\.port), [3100])
+        XCTAssertEqual(try w.startServices(b.slug).map(\.port), [3110])
+        XCTAssertTrue(try w.startServices(a.slug).isEmpty, "já no ar")
+        XCTAssertTrue(w.serviceStatuses(a, r)[0].running)
+        let wt = w.worktreePath(b.slug, "rebocs_api")
+        let deadline = Date().addingTimeInterval(20)
+        while !Paths.exists(wt + "/ports.txt"), Date() < deadline {
+            Thread.sleep(forTimeInterval: 0.1)
+        }
+        XCTAssertEqual(try File.read(wt + "/ports.txt"), "3110 3010\n")
+        XCTAssertEqual(w.stopServices(a.slug), 1)
+        XCTAssertFalse(w.serviceStatuses(a, r)[0].running)
+        XCTAssertTrue(w.serviceStatuses(b, r)[0].running)
+        _ = try w.park(b.slug)
+        XCTAssertFalse(w.serviceStatuses(b, r)[0].running)
+        XCTAssertThrowsError(try w.startServices(b.slug), "estacionada")
+        _ = try w.archive(a.slug, force: true)
+        let (c, _) = try w.newTrama(NewTramaOptions(title: "Porta C", repos: ["api"], noFetch: true))
+        XCTAssertEqual(c.portIndex, 0, "o índice de uma trama arquivada é reaproveitado")
+    }
+
+    func testPortInUseIsRefused() throws {
+        let w = try lab.workspace()
+        let fd = socket(AF_INET, SOCK_STREAM, 0)
+        defer { close(fd) }
+        var addr = sockaddr_in()
+        addr.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
+        addr.sin_family = sa_family_t(AF_INET)
+        addr.sin_port = 0
+        addr.sin_addr.s_addr = in_addr_t(0)
+        _ = withUnsafeMutablePointer(to: &addr) { $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { Darwin.bind(fd, $0, socklen_t(MemoryLayout<sockaddr_in>.size)) } }
+        listen(fd, 1)
+        var len = socklen_t(MemoryLayout<sockaddr_in>.size)
+        _ = withUnsafeMutablePointer(to: &addr) { $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { getsockname(fd, $0, &len) } }
+        let busy = Int(UInt16(bigEndian: addr.sin_port))
+        XCTAssertTrue(Workspace.portInUse(busy))
+        try w.setServices("api", [ServiceConfig(name: "dev", command: "sleep 60", port: busy)])
+        let (t, _) = try w.newTrama(NewTramaOptions(title: "Ocupada", repos: ["api"], noFetch: true))
+        XCTAssertThrowsError(try w.startServices(t.slug)) { XCTAssertTrue(errorMessage($0).contains("em uso")) }
+    }
+
+    func testPullRequestsAreOpenedInOrderAndLinked() throws {
+        let w = try lab.workspace()
+        let log = lab.root + "/gh.log"
+        let fake = lab.root + "/gh"
+        try lab.write(fake, """
+        #!/bin/sh
+        echo "$PWD|$*" >> "\(log)"
+        case "$1 $2" in
+          "pr view")
+            case "$*" in
+              *--jq*) exit 1 ;;
+              *) echo '{"number":7,"state":"OPEN","isDraft":false,"statusCheckRollup":[{"status":"COMPLETED","conclusion":"SUCCESS"},{"status":"IN_PROGRESS","conclusion":""}]}' ;;
+            esac ;;
+          "pr create") echo "https://github.com/x/$(basename "$PWD")/pull/7" ;;
+          "pr edit") ;;
+        esac
+        """)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: fake)
+        setenv("TRAMA_GH", fake, 1)
+        defer { unsetenv("TRAMA_GH") }
+        try w.setMergeRank("admin", 2)
+        try w.setMergeRank("api", 1)
+        let (t, _) = try w.newTrama(NewTramaOptions(title: "Com PRs", repos: ["admin", "api", "android"], goal: "Entregar tudo", noFetch: true))
+        try w.addDecision(t.slug, author: "você", "contrato novo")
+        try lab.commit(w.worktreePath(t.slug, "rebocs_api"), "api.txt", "x\n", "api")
+        try lab.commit(w.worktreePath(t.slug, "rebocs-admin"), "admin.txt", "x\n", "admin")
+        let result = try w.openPullRequests(t.slug, draft: true)
+        XCTAssertEqual(result.prs.map(\.repo), ["rebocs_api", "rebocs-admin"], "só os repositórios com commits, na ordem de merge")
+        XCTAssertTrue(result.warnings.contains { $0.repo == "rebocs-android" && $0.message.contains("sem commits") })
+        XCTAssertEqual(result.prs[0].number, 7)
+        XCTAssertEqual(result.prs[0].ci, CIState.pending)
+        XCTAssertEqual(Set(try w.trama(t.slug).prs.keys), ["rebocs_api", "rebocs-admin"])
+        let calls = try File.read(log) ?? ""
+        XCTAssertTrue(calls.contains("--draft"))
+        XCTAssertTrue(calls.contains("--base main --head trama/com-prs --title Com PRs"))
+        XCTAssertTrue(calls.contains("Entregar tudo"))
+        XCTAssertTrue(calls.contains("1. https://github.com/x/rebocs_api/pull/7\n2. https://github.com/x/rebocs-admin/pull/7 ← este PR"))
+        let remote = lab.root + "/remotos/rebocs_api.git"
+        XCTAssertTrue(Git.branchExists(remote, "trama/com-prs"))
+        XCTAssertEqual(ciState([["status": "COMPLETED", "conclusion": "FAILURE"], ["status": "IN_PROGRESS"]]), CIState.failure)
+        XCTAssertEqual(ciState([["status": "COMPLETED", "conclusion": "SUCCESS"]]), CIState.success)
+        XCTAssertEqual(ciState([]), CIState.none)
+    }
+
+    func testMergeOneTramaIntoAnother() throws {
+        let w = try lab.workspace()
+        let (a, _) = try w.newTrama(NewTramaOptions(title: "Origem", repos: ["api", "admin"], noFetch: true))
+        let (b, _) = try w.newTrama(NewTramaOptions(title: "Destino", repos: ["api", "android"], noFetch: true))
+        let apiA = w.worktreePath(a.slug, "rebocs_api")
+        let apiB = w.worktreePath(b.slug, "rebocs_api")
+        XCTAssertEqual(w.sharedRepos(a, b), ["rebocs_api"])
+        XCTAssertThrowsError(try w.mergeTrama(from: a.slug, into: a.slug))
+        try lab.commit(apiA, "feature.txt", "nova\n", "feature")
+        try lab.write(apiB + "/solto.txt", "x\n")
+        XCTAssertThrowsError(try w.mergeTrama(from: a.slug, into: b.slug), "destino sujo") { XCTAssertTrue(errorMessage($0).contains("nada foi mesclado")) }
+        XCTAssertFalse(Paths.exists(apiB + "/feature.txt"))
+        try FileManager.default.removeItem(atPath: apiB + "/solto.txt")
+        let ok = try w.mergeTrama(from: a.slug, into: b.slug)
+        XCTAssertEqual(ok.map(\.situation), ["mesclado"])
+        XCTAssertEqual(try File.read(apiB + "/feature.txt"), "nova\n")
+        XCTAssertEqual(try w.mergeTrama(from: a.slug, into: b.slug).map(\.situation), ["atualizado"])
+        XCTAssertTrue(try w.readCapsule(b.slug).journal.contains { $0.text.contains("merge de “Origem”") })
+        try lab.commit(apiA, "src/app.txt", "linha A\nlinha 2\nlinha 3\n", "mexe A")
+        try lab.commit(apiB, "src/app.txt", "linha B\nlinha 2\nlinha 3\n", "mexe B")
+        XCTAssertThrowsError(try w.mergeTrama(from: a.slug, into: b.slug)) { XCTAssertTrue(errorMessage($0).contains("conflito")) }
+        XCTAssertEqual(try Git.statusLines(apiB), [], "nada foi tocado")
+        let conflict = try w.mergeTrama(from: a.slug, into: b.slug, allowConflicts: true)
+        XCTAssertEqual(conflict.map(\.situation), ["conflito"])
+        XCTAssertFalse(try Git.statusLines(apiB).isEmpty)
+    }
+
+    func testMergeBetweenWorktrees() throws {
+        let w = try lab.workspace()
+        let main = lab.repos["rebocs_api"]!
+        let (t, _) = try w.newTrama(NewTramaOptions(title: "Para a main", repos: ["api"], noFetch: true))
+        let wt = w.worktreePath(t.slug, "rebocs_api")
+        try lab.commit(wt, "novo.txt", "x\n", "novo")
+        try lab.write(main + "/solto.txt", "sujo\n")
+        let r = try w.mergeWorktrees(repo: "api", from: wt, into: main)
+        XCTAssertEqual(r.situation, "mesclado")
+        XCTAssertEqual(try File.read(main + "/novo.txt"), "x\n")
+        XCTAssertTrue(Paths.exists(main + "/solto.txt"), "mudança solta do destino preservada")
+        XCTAssertEqual(try w.mergeWorktrees(repo: "api", from: wt, into: main).situation, "atualizado")
+        XCTAssertThrowsError(try w.mergeWorktrees(repo: "api", from: wt, into: wt))
+        XCTAssertThrowsError(try w.mergeWorktrees(repo: "api", from: wt, into: lab.root))
     }
 
     func testFailureMidwayUndoesEverything() throws {
@@ -631,5 +857,19 @@ final class GitOverviewTests: XCTestCase {
         var g = Finding(type: FindingType.forgottenChange, repo: "rebocs_api", title: "x", detail: "y")
         g.path = dir
         XCTAssertEqual(try w.findingChanges(g).changes.map(\.path), ["src/app.txt"])
+    }
+}
+
+final class TransitionTests: XCTestCase {
+    private func agent(_ session: String, _ state: String) -> Agent {
+        Agent(session: session, trama: "t", repo: "r", cwd: "/x", state: state, message: nil, startedAt: 1, updatedAt: 1)
+    }
+
+    func testTransitionsOnlyOnChange() {
+        let before = [agent("a", AgentState.working), agent("b", AgentState.waiting), agent("c", AgentState.working)]
+        let after = [agent("a", AgentState.waiting), agent("b", AgentState.waiting), agent("c", AgentState.done), agent("d", AgentState.waiting), agent("e", AgentState.done)]
+        let result = agentTransitions(from: before, to: after)
+        XCTAssertEqual(result.map(\.agent.session), ["a", "c", "d"])
+        XCTAssertEqual(result.map(\.alert), [.waiting, .done, .waiting])
     }
 }

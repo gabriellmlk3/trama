@@ -10,11 +10,17 @@ struct NewTramaView: View {
     @State private var base = ""
     @State private var task = ""
     @State private var goal = ""
+    @State private var context: String?
     @State private var openAgents = true
     @State private var sending = false
 
     var slug: String { slugify(title) }
     var chosen: [RepoConfig] { model.repos.filter { selected.contains($0.name) } }
+    var contextLabel: String {
+        if let context { return Paths.abbreviate(context) }
+        if let global = model.state?.context { return "padrão · \(Paths.name(global))" }
+        return "nenhum · a cápsula fica na pasta da trama"
+    }
     var canWeave: Bool { !slug.isEmpty && !chosen.isEmpty && !sending }
 
     var body: some View {
@@ -74,6 +80,26 @@ struct NewTramaView: View {
                             .textFieldStyle(.plain)
                             .font(.system(size: 13))
                             .lineLimit(1...3)
+                    }
+                    GridRow {
+                        label("Contexto")
+                        HStack(spacing: 10) {
+                            Text(contextLabel)
+                                .font(Theme.mono(12))
+                                .foregroundStyle(context == nil ? Theme.faded : Theme.text)
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                            Button("Escolher…") {
+                                if let folder = Terminal.choosePaths(multiple: false, title: "Repositório de contexto desta trama").first {
+                                    context = folder
+                                }
+                            }
+                            .buttonStyle(GhostButton(compact: true))
+                            if context != nil {
+                                Button("Usar padrão") { context = nil }
+                                    .buttonStyle(GhostButton(compact: true))
+                            }
+                        }
                     }
                     GridRow {
                         label("Agentes")
@@ -151,7 +177,7 @@ struct NewTramaView: View {
         let o = goal.trimmingCharacters(in: .whitespacesAndNewlines)
         let agents = openAgents
         Task {
-            let options = NewTramaOptions(title: name, repos: repos, base: b, task: t, goal: o)
+            let options = NewTramaOptions(title: name, repos: repos, base: b, task: t, goal: o, context: context)
             let ok = await model.newTrama(options, openAgents: agents)
             sending = false
             if ok { dismiss() }

@@ -5,12 +5,12 @@ extension CLI {
         "init": Command(summary: "configura a pasta das tramas e o repositório de contexto",
                         usage: "trama init [--raiz ~/Tramas] [--contexto <pasta do repo de contexto>]",
                         valueFlags: ["contexto"], run: cmdInit),
-        "repo": Command(summary: "cadastra repositórios (add, ls, rm)",
-                        usage: "trama repo add <pasta>... [--apelido api] [--rotulo backend] [--base main]\n  trama repo ls\n  trama repo rm <nome>",
-                        valueFlags: ["apelido", "rotulo", "base"], run: cmdRepo),
+        "repo": Command(summary: "cadastra repositórios (add, ls, rm, preparo, servico, ordem)",
+                        usage: "trama repo add <pasta>... [--apelido api] [--rotulo backend] [--base main]\n  trama repo ls\n  trama repo rm <nome>\n  trama repo preparo <nome> [--copiar \".env*,local.properties\"] [--rodar \"npm ci\"] [--limpar]\n  trama repo servico <nome> [--nome api --comando \"npm run dev\" --porta 3000] [--remover api]\n  trama repo ordem <nome> <n>   (ordem de merge dos PRs: menor primeiro)",
+                        valueFlags: ["apelido", "rotulo", "base", "copiar", "rodar", "nome", "comando", "porta", "remover"], run: cmdRepo),
         "nova": Command(summary: "cria uma trama: branch + worktree em cada repositório + cápsula",
-                        usage: "trama nova \"Título\" --repos api,admin [--base main] [--tarefa CU-482] [--objetivo \"...\"] [--slug x] [--sem-fetch]",
-                        valueFlags: ["repos", "base", "tarefa", "objetivo", "slug"], run: cmdNew),
+                        usage: "trama nova \"Título\" --repos api,admin [--base main] [--tarefa CU-482] [--objetivo \"...\"] [--contexto <pasta>] [--slug x] [--sem-fetch]",
+                        valueFlags: ["repos", "base", "tarefa", "objetivo", "contexto", "slug"], run: cmdNew),
         "ls": Command(summary: "lista as tramas", usage: "trama ls [--todas]", valueFlags: [], run: cmdList),
         "status": Command(summary: "situação dos repositórios de uma trama (ou de todas)", usage: "trama status [trama]", valueFlags: [], run: cmdStatus),
         "estado": Command(summary: "tudo em JSON", usage: "trama estado [--todas]", valueFlags: [], run: cmdState),
@@ -19,9 +19,18 @@ extension CLI {
         "estacionar": Command(summary: "pausa uma trama (os worktrees ficam intactos)", usage: "trama estacionar [trama]", valueFlags: [], run: cmdPark),
         "retomar": Command(summary: "reativa uma trama, com rebase opcional na base", usage: "trama retomar <trama> [--rebase] [--sem-fetch]", valueFlags: [], run: cmdResume),
         "arquivar": Command(summary: "remove os worktrees e arquiva a trama (branches ficam)", usage: "trama arquivar <trama> [--forcar]", valueFlags: [], run: cmdArchive),
+        "subir": Command(summary: "sobe os serviços de desenvolvimento da trama, cada um na sua porta",
+                         usage: "trama subir [--trama x] [--repo nome] [--servico nome]", valueFlags: ["trama", "repo", "servico"], run: cmdUp),
+        "descer": Command(summary: "derruba os serviços da trama", usage: "trama descer [--trama x] [--repo nome] [--servico nome]", valueFlags: ["trama", "repo", "servico"], run: cmdDown),
+        "pr": Command(summary: "abre os PRs de todos os repositórios da trama, ligados entre si (usa o gh)",
+                      usage: "trama pr [--rascunho] [--trama x]\n  trama pr ls [--trama x]", valueFlags: ["trama"], run: cmdPullRequests),
+        "merge": Command(summary: "traz os commits de uma trama para outra, nos repositórios que as duas têm",
+                         usage: "trama merge <origem> [--para destino] [--repo a,b] [--permitir-conflito]", valueFlags: ["para", "repo"], run: cmdMerge),
+        "preparar": Command(summary: "refaz o preparo dos worktrees (copia arquivos e roda a receita do repositório)", usage: "trama preparar <trama> [repo]", valueFlags: [], run: cmdPrepare),
         "caminho": Command(summary: "imprime a pasta da trama ou de um repositório nela", usage: "trama caminho <trama> [repo]", valueFlags: [], run: cmdPath),
         "onde": Command(summary: "diz em qual trama e repositório você está", usage: "trama onde", valueFlags: [], run: cmdWhere),
         "capsula": Command(summary: "mostra a cápsula da trama", usage: "trama capsula [trama] [--json]", valueFlags: [], run: cmdCapsule),
+        "contexto": Command(summary: "define o repositório de contexto de uma trama", usage: "trama contexto <pasta|global> [--trama x]", valueFlags: ["trama"], run: cmdContext),
         "objetivo": Command(summary: "define o objetivo da trama", usage: "trama objetivo \"texto\" [--trama x]", valueFlags: ["trama"], run: cmdGoal),
         "decisao": Command(summary: "registra uma decisão na cápsula", usage: "trama decisao \"texto\" [--trama x] [--autor nome]", valueFlags: ["trama", "autor"], run: cmdDecision),
         "handoff": Command(summary: "passa trabalho para o agente de outro repositório",
@@ -83,6 +92,41 @@ extension CLI {
             guard let key = a.positional(1) else { throw TramaError("uso: trama repo rm <nome>") }
             let r = try w.removeRepo(key)
             c.ok("\(r.name) saiu do cadastro (nada foi apagado do disco)")
+        case "preparo":
+            guard let key = a.positional(1) else { throw TramaError("uso: trama repo preparo <nome> [--copiar padrões] [--rodar comando] [--limpar]") }
+            var r = try w.repo(key)
+            if a.has("limpar") || a.value("copiar") != nil || a.value("rodar") != nil {
+                let copy = a.has("limpar") ? [] : a.value("copiar").map { $0.split(separator: ",").map(String.init) } ?? r.copy
+                let run = a.has("limpar") ? [] : a.value("rodar").map { [$0] } ?? r.run
+                r = try w.setRecipe(r.name, copy: copy, run: run)
+            }
+            if c.json { return try c.emitJSON(r) }
+            c.line("\(r.name)")
+            c.line("  copiar: \(r.copy.isEmpty ? "—" : r.copy.joined(separator: ", "))")
+            c.line("  rodar:  \(r.run.isEmpty ? "—" : r.run.joined(separator: " && "))")
+        case "ordem":
+            guard let key = a.positional(1), let n = a.positional(2).flatMap({ Int($0) }) else { throw TramaError("uso: trama repo ordem <nome> <n>") }
+            let r = try w.setMergeRank(key, n)
+            c.ok("\(r.name): ordem de merge \(r.mergeRank)")
+        case "servico":
+            guard let key = a.positional(1) else { throw TramaError("uso: trama repo servico <nome> [--nome x --comando \"...\" --porta 3000] [--remover x]") }
+            var r = try w.repo(key)
+            if let remove = a.value("remover") {
+                guard r.services.contains(where: { $0.name == remove }) else { throw TramaError("\(r.name) não tem o serviço “\(remove)”") }
+                r = try w.setServices(r.name, r.services.filter { $0.name != remove })
+            } else if let name = a.value("nome") {
+                guard let command = a.value("comando"), let port = a.value("porta").flatMap({ Int($0) }) else {
+                    throw TramaError("informe --comando e --porta")
+                }
+                var list = r.services.filter { $0.name != name }
+                list.append(ServiceConfig(name: name, command: command, port: port))
+                r = try w.setServices(r.name, list)
+            }
+            if c.json { return try c.emitJSON(r.services) }
+            if r.services.isEmpty { return c.line("\(r.name) não tem serviços") }
+            for s in r.services {
+                c.line("  \(s.name) · porta \(s.port) (+10 por trama) · \(s.command)")
+            }
         case "ls", "lista":
             if c.json { return try c.emitJSON(w.config.repos) }
             guard !w.config.repos.isEmpty else {
@@ -94,7 +138,7 @@ extension CLI {
             }
             c.text(table(rows))
         default:
-            throw TramaError("subcomando desconhecido: \(a.positional(0) ?? "") (use add, ls ou rm)")
+            throw TramaError("subcomando desconhecido: \(a.positional(0) ?? "") (use add, ls, rm, preparo, servico ou ordem)")
         }
     }
 
@@ -108,6 +152,7 @@ extension CLI {
             base: a.value("base"),
             task: a.value("tarefa"),
             goal: a.value("objetivo"),
+            context: a.value("contexto"),
             noFetch: a.has("sem-fetch")
         )
         let (t, warnings) = try w.newTrama(o)
@@ -259,6 +304,76 @@ extension CLI {
         c.ok("\(t.title) arquivada · worktrees removidos, branch \(t.branch) mantida em cada repositório")
     }
 
+    private static func serviceScope(_ c: Context, _ w: Workspace, _ a: Arguments) throws -> (slug: String, repo: String?) {
+        let target = try c.targetTrama(w, a.value("trama"))
+        return (target.trama.slug, try a.value("repo").map { try w.repo($0).name } ?? target.repo?.name)
+    }
+
+    static func cmdUp(_ c: Context, _ a: Arguments) throws {
+        let w = try c.open()
+        let scope = try serviceScope(c, w, a)
+        let started = try w.startServices(scope.slug, repo: scope.repo, service: a.value("servico"))
+        if c.json { return try c.emitJSON(started) }
+        if started.isEmpty { return c.line("Os serviços já estavam no ar.") }
+        for s in started {
+            c.ok("\(s.name) → \(s.url) · log em \(Paths.abbreviate(s.log))")
+        }
+    }
+
+    static func cmdDown(_ c: Context, _ a: Arguments) throws {
+        let w = try c.open()
+        let scope = try serviceScope(c, w, a)
+        let n = w.stopServices(scope.slug, repo: scope.repo, service: a.value("servico"))
+        c.ok(n == 0 ? "Nenhum serviço no ar." : "\(n) \(plural(n, "serviço derrubado", "serviços derrubados"))")
+    }
+
+    static func cmdPullRequests(_ c: Context, _ a: Arguments) throws {
+        let w = try c.open()
+        let target = try c.targetTrama(w, a.value("trama"))
+        if a.positional(0) == "ls" {
+            let infos = w.pullRequestInfos(target.trama)
+            if c.json { return try c.emitJSON(infos) }
+            guard !infos.isEmpty else { return c.line("Esta trama ainda não tem PRs · rode `trama pr`") }
+            var rows = [["REPO", "PR", "ESTADO", "CI", "ENDEREÇO"]]
+            for i in infos { rows.append([i.repo, "#\(i.number)", i.draft ? "rascunho" : i.state, i.ci, i.url]) }
+            return c.text(table(rows))
+        }
+        let result = try w.openPullRequests(target.trama.slug, draft: a.has("rascunho"))
+        if c.json { return try c.emitJSON(result.prs) }
+        for p in result.prs { c.ok("\(p.repo): \(p.url)") }
+        c.warnings(result.warnings)
+    }
+
+    static func cmdMerge(_ c: Context, _ a: Arguments) throws {
+        let w = try c.open()
+        guard let source = a.positional(0) else { throw TramaError("uso: trama merge <origem> [--para destino] [--repo a,b] [--permitir-conflito]") }
+        let target = try c.targetTrama(w, a.value("para"))
+        let results = try w.mergeTrama(from: source, into: target.trama.slug, repos: a.value("repo").map { [$0] } ?? [], allowConflicts: a.has("permitir-conflito"))
+        if c.json { return try c.emitJSON(results) }
+        for r in results {
+            c.line("  \(r.repo): \(r.situation)" + (r.detail.map { " · " + $0 } ?? ""))
+        }
+    }
+
+    static func cmdPrepare(_ c: Context, _ a: Arguments) throws {
+        let w = try c.open()
+        guard let slug = a.positional(0) else { throw TramaError("uso: trama preparar <trama> [repo]") }
+        let t = try w.trama(slug)
+        let names: [String]
+        if let key = a.positional(1) {
+            names = [try w.repo(key).name]
+        } else {
+            names = t.repos.filter { (try? w.repo($0).recipe.isEmpty) == false }
+        }
+        guard !names.isEmpty else { throw TramaError("nenhum repositório da trama tem receita de preparo") }
+        var warnings: [Warning] = []
+        for name in names {
+            warnings += try w.prepare(t.slug, name)
+            c.ok("\(name): preparo iniciado · log em \(Paths.abbreviate(w.prepLogPath(t.slug, name)))")
+        }
+        c.warnings(warnings)
+    }
+
     static func cmdPath(_ c: Context, _ a: Arguments) throws {
         let w = try c.open()
         guard let slug = a.positional(0) else { throw TramaError("uso: trama caminho <trama> [repo]") }
@@ -294,6 +409,18 @@ extension CLI {
             throw TramaError("a cápsula de \(t.slug) ainda não existe (\(capsule.path))")
         }
         c.text(capsule.markdown)
+    }
+
+    static func cmdContext(_ c: Context, _ a: Arguments) throws {
+        let w = try c.open()
+        let t = try c.targetTrama(w, a.value("trama")).trama
+        guard let target = a.positional(0) else {
+            let current = w.contextPath(t.slug).map { Paths.abbreviate($0) } ?? "nenhum"
+            c.line("contexto de \(t.title): \(current)\(t.context == nil ? " (padrão global)" : "")")
+            return
+        }
+        let updated = try w.setTramaContext(t.slug, target == "global" ? nil : target)
+        c.ok("contexto de \(updated.title): \(updated.context.map { Paths.abbreviate($0) } ?? "padrão global")")
     }
 
     static func cmdGoal(_ c: Context, _ a: Arguments) throws {

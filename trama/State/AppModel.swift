@@ -19,6 +19,7 @@ final class AppModel: ObservableObject {
     @Published var capsule: TramaCapsule?
     @Published var findings: [Finding] = []
     @Published var findingsAt: Date?
+    @Published var pullRequests: [String: [PullRequestInfo]] = [:]
     @Published var error: String?
     @Published var notice: String?
     @Published var needsSetup = false
@@ -30,14 +31,26 @@ final class AppModel: ObservableObject {
 
     private var loop: Task<Void, Never>?
     private var refreshing = false
+    private var knownAgents: [Agent]?
+
+    var waitingCount: Int { activeAgents.filter { $0.isWaiting }.count }
 
     func start() {
         guard loop == nil else { return }
+        Notifier.shared.onOpen = { [weak self] slug, path in
+            guard let self else { return }
+            self.select(slug)
+            if !self.terminals.focus(path: path) {
+                self.terminals.open(path: path, command: "claude", title: "\(Paths.name(path)) · claude")
+            }
+        }
+        Notifier.shared.start()
         loop = Task { [weak self] in
             DispatchQueue.global(qos: .utility).async { Integration.sync() }
             await self?.refresh()
             await self?.fetchRemotes()
             await self?.refreshFindings()
+            await self?.refreshPullRequests()
             var cycle = 0
             while !Task.isCancelled {
                 try? await Task.sleep(nanoseconds: 5_000_000_000)
@@ -45,7 +58,10 @@ final class AppModel: ObservableObject {
                 cycle += 1
                 await self.refresh()
                 if cycle % 120 == 0 { await self.fetchRemotes() }
-                if cycle % 12 == 0 { await self.refreshFindings() }
+                if cycle % 12 == 0 {
+                    await self.refreshFindings()
+                    await self.refreshPullRequests()
+                }
             }
         }
     }
@@ -57,6 +73,7 @@ final class AppModel: ObservableObject {
         do {
             let new = try await Core.run { try $0.fullState() }
             state = new
+            notifyTransitions(new)
             needsSetup = false
             if screen == nil, let first = new.tramas.first(where: { $0.isActive }) ?? new.tramas.first {
                 screen = .trama(first.slug)
@@ -71,11 +88,51 @@ final class AppModel: ObservableObject {
         }
     }
 
+    private func notifyTransitions(_ new: OverallState) {
+        let waiting = new.agents.filter { $0.isWaiting }.count
+        NSApp.dockTile.badgeLabel = waiting > 0 ? String(waiting) : nil
+        defer { knownAgents = new.agents }
+        guard let previous = knownAgents else { return }
+        for transition in agentTransitions(from: previous, to: new.agents) {
+            let agent = transition.agent
+            let live = new.tramas.first(where: { $0.slug == agent.trama })
+            let path = live?.status(for: agent.repo)?.path ?? agent.cwd
+            Notifier.shared.post(transition, tramaTitle: live?.title ?? agent.trama, path: path)
+        }
+    }
+
     func refreshFindings() async {
         guard !needsSetup else { return }
         do {
             findings = try await Core.run { try $0.findings() }
             findingsAt = Date()
+        } catch {
+            showError(errorMessage(error))
+        }
+    }
+
+    func refreshPullRequests() async {
+        guard !needsSetup, let tramas = state?.tramas.filter({ !$0.isArchived && !$0.trama.prs.isEmpty }), !tramas.isEmpty else {
+            pullRequests = [:]
+            return
+        }
+        let list = tramas.map(\.trama)
+        if let result = try? await Core.run({ w in Dictionary(uniqueKeysWithValues: list.map { ($0.slug, w.pullRequestInfos($0)) }) }) {
+            pullRequests = result
+        }
+    }
+
+    func openPullRequests(_ slug: String, draft: Bool) async {
+        busy = true
+        defer { busy = false }
+        do {
+            let result = try await Core.run { try $0.openPullRequests(slug, draft: draft) }
+            showNotice("PRs abertos")
+            if !result.warnings.isEmpty {
+                showError(result.warnings.map { w in w.repo.map { "\($0): \(w.message)" } ?? w.message }.joined(separator: "\n"))
+            }
+            await refresh()
+            await refreshPullRequests()
         } catch {
             showError(errorMessage(error))
         }
@@ -227,6 +284,16 @@ final class AppModel: ObservableObject {
         await loadCapsule(slug)
     }
 
+    func replaceGoal(_ text: String, previous: String?, trama slug: String) async {
+        await perform { w in
+            if let previous, !previous.isEmpty {
+                try w.addJournal(slug, "Objetivo atingido: \(previous)")
+            }
+            try w.setGoal(slug, text)
+        }
+        await loadCapsule(slug)
+    }
+
     func completePending(_ n: Int, trama slug: String) async {
         await perform { try $0.completePending(slug, n) }
         await loadCapsule(slug)
@@ -235,6 +302,11 @@ final class AppModel: ObservableObject {
     func confirmHandoff(_ n: Int, trama slug: String) async {
         await perform { _ = try $0.confirmHandoffs(slug, to: nil, number: n) }
         await loadCapsule(slug)
+    }
+
+    func setTramaContext(_ slug: String, _ path: String?) async {
+        let ok = await perform(success: path == nil ? "Voltou ao contexto padrão" : "Repositório de contexto da trama atualizado") { _ = try $0.setTramaContext(slug, path) }
+        if ok { await loadCapsule(slug) }
     }
 
     func sync(_ slug: String) async {
@@ -331,6 +403,63 @@ final class AppModel: ObservableObject {
             }
             if failures.count == paths.count { throw TramaError(failures.joined(separator: "\n")) }
         }
+    }
+
+    func setRecipe(_ name: String, copy: [String], run: [String]) async {
+        await perform(success: "Receita de \(name) salva") { _ = try $0.setRecipe(name, copy: copy, run: run) }
+    }
+
+    func merge(_ source: LiveTrama, into target: LiveTrama) async {
+        busy = true
+        defer { busy = false }
+        do {
+            let results = try await Core.run { try $0.mergeTrama(from: source.slug, into: target.slug) }
+            await refresh()
+            let lines = results.map { "\($0.repo): \($0.situation)" + ($0.detail.map { " · " + $0 } ?? "") }
+            if results.allSatisfy({ $0.situation == "mesclado" || $0.situation == "atualizado" }) {
+                showNotice("“\(source.title)” entrou em “\(target.title)”")
+            } else {
+                showError(lines.joined(separator: "\n"))
+            }
+        } catch {
+            showError(errorMessage(error))
+        }
+    }
+
+    func mergeWorktree(_ repo: String, from source: String, into target: String, label: String) async {
+        busy = true
+        defer { busy = false }
+        do {
+            let result = try await Core.run { try $0.mergeWorktrees(repo: repo, from: source, into: target) }
+            await refresh()
+            if result.situation == "mesclado" || result.situation == "atualizado" {
+                showNotice("Merge em \(label): \(result.detail ?? result.situation)")
+            } else {
+                showError("\(label): \(result.detail ?? result.situation)")
+            }
+        } catch {
+            showError(errorMessage(error))
+        }
+    }
+
+    func setServices(_ name: String, _ services: [ServiceConfig]) async {
+        await perform(success: "Serviços de \(name) salvos") { _ = try $0.setServices(name, services) }
+    }
+
+    func setMergeRank(_ name: String, _ rank: Int) async {
+        await perform { _ = try $0.setMergeRank(name, rank) }
+    }
+
+    func startServices(_ slug: String, repo: String) async {
+        await perform { _ = try $0.startServices(slug, repo: repo) }
+    }
+
+    func stopServices(_ slug: String, repo: String) async {
+        await perform { $0.stopServices(slug, repo: repo) }
+    }
+
+    func prepare(_ slug: String, _ repo: String) async {
+        await perform(success: "Preparando \(repo)…") { _ = try $0.prepare(slug, repo) }
     }
 
     func removeRepo(_ name: String) async {
