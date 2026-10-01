@@ -603,6 +603,27 @@ final class FlowTests: XCTestCase {
         XCTAssertEqual(ciState([]), CIState.none)
     }
 
+    func testRemoteBranchesCanBeCreatedRenamedAndDeleted() throws {
+        let w = try lab.workspace()
+        let (t, _) = try w.newTrama(NewTramaOptions(title: "Branches", repos: ["api", "admin"], noFetch: true))
+        let repos = ["rebocs_api", "rebocs-admin"]
+        func names() throws -> [String] { try w.remoteBranchCatalog(t.slug, fetch: true).options.map(\.name) }
+
+        try w.createRemoteBranch(t.slug, name: "release", from: "main", repos: repos)
+        XCTAssertEqual(Set(try names()), ["main", "release"])
+        XCTAssertThrowsError(try w.createRemoteBranch(t.slug, name: "release", from: "main", repos: repos))
+        XCTAssertThrowsError(try w.createRemoteBranch(t.slug, name: "bad name", from: "main", repos: repos))
+
+        try w.renameRemoteBranch(t.slug, from: "release", to: "staging", repos: repos)
+        XCTAssertEqual(Set(try names()), ["main", "staging"])
+        XCTAssertThrowsError(try w.renameRemoteBranch(t.slug, from: "main", to: "other", repos: repos))
+
+        try w.deleteRemoteBranch(t.slug, name: "staging", repos: ["rebocs_api"])
+        let catalog = try w.remoteBranchCatalog(t.slug, fetch: true)
+        XCTAssertEqual(catalog.options.first { $0.name == "staging" }?.repos, ["rebocs-admin"])
+        XCTAssertThrowsError(try w.deleteRemoteBranch(t.slug, name: "main", repos: repos))
+    }
+
     func testPullRequestsCanTargetAnotherBranchPerRepo() throws {
         let w = try lab.workspace()
         let log = lab.root + "/gh.log"
@@ -1446,5 +1467,34 @@ final class TransitionTests: XCTestCase {
         let result = agentTransitions(from: before, to: after)
         XCTAssertEqual(result.map(\.agent.session), ["a", "c", "d"])
         XCTAssertEqual(result.map(\.alert), [.waiting, .done, .waiting])
+    }
+}
+
+final class GitAuthenticationTests: XCTestCase {
+    func testAuthenticationFailuresPointToGitAccounts() {
+        let messages = [
+            "fatal: could not read Username for 'https://github.com': terminal prompts disabled",
+            "remote: Invalid username or token. Password authentication is not supported",
+            "remote: HTTP Basic: Access denied",
+            "git@gitlab.com: Permission denied (publickey)."
+        ]
+        for stderr in messages {
+            let error = GitError(args: ["push"], code: 128, stderr: stderr)
+            XCTAssertTrue(error.isAuthenticationFailure, stderr)
+            XCTAssertTrue(error.description.contains("Contas Git"), stderr)
+        }
+    }
+
+    func testOtherFailuresKeepTheGitMessage() {
+        let error = GitError(args: ["push"], code: 1, stderr: "! [rejected] main -> main (non-fast-forward)")
+        XCTAssertFalse(error.isAuthenticationFailure)
+        XCTAssertTrue(error.description.hasPrefix("git push:"))
+    }
+
+    func testCredentialEnvironmentsCoverEveryProvider() {
+        for kind in ProviderKind.withCredentials {
+            XCTAssertFalse(kind.defaultHost.isEmpty)
+            XCTAssertNotNil(kind.tokenPage(host: kind.defaultHost, organization: "acme"))
+        }
     }
 }

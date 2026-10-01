@@ -10,6 +10,14 @@ struct PreferencesView: View {
     @AppStorage(ClaudeTarget.storageKey) private var claudeTarget = ClaudeTarget.cli.rawValue
     @AppStorage(AgentScope.storageKey) private var agentScope = AgentScope.single.rawValue
     @State private var editingRecipe: RepoConfig?
+    @State private var credentials = GitCredentials.all()
+    @State private var credentialKind = ProviderKind.github
+    @State private var credentialHost = ProviderKind.github.defaultHost
+    @State private var credentialUser = ""
+    @State private var credentialOrganization = ""
+    @State private var credentialToken = ""
+    @State private var credentialBusy = false
+    @State private var credentialMessage: String?
     @AppStorage(NotificationPreference.waiting) private var notifyWaiting = true
     @AppStorage(NotificationPreference.done) private var notifyDone = true
 
@@ -54,6 +62,69 @@ struct PreferencesView: View {
                 Text("Integração")
             } footer: {
                 Text("Os hooks entregam a cápsula a cada sessão aberta dentro de uma trama e mostram aqui o que cada agente está fazendo. Fora das tramas eles não fazem nada.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Section {
+                ForEach(credentials) { c in
+                    LabeledContent("\(c.kind.title) · \(c.host)") {
+                        HStack(spacing: 10) {
+                            OnIndicator(on: true, text: c.username ?? "token no Keychain")
+                            Button("Remover") {
+                                GitCredentials.remove(host: c.host)
+                                credentials = GitCredentials.all()
+                            }
+                        }
+                    }
+                }
+                Picker("Provedor", selection: $credentialKind) {
+                    ForEach(ProviderKind.withCredentials, id: \.self) { Text($0.title).tag($0) }
+                }
+                .onChange(of: credentialKind) { _, kind in
+                    credentialHost = kind.defaultHost
+                    credentialMessage = nil
+                }
+                TextField("Servidor", text: $credentialHost)
+                    .textFieldStyle(.roundedBorder)
+                    .disabled(credentialKind == .azure)
+                if credentialKind.needsUsername {
+                    TextField("Usuário", text: $credentialUser)
+                        .textFieldStyle(.roundedBorder)
+                }
+                if credentialKind == .azure {
+                    TextField("Organização (opcional, para validar o token)", text: $credentialOrganization)
+                        .textFieldStyle(.roundedBorder)
+                }
+                HStack(spacing: 10) {
+                    SecureField(credentialKind.tokenHint, text: $credentialToken)
+                        .textFieldStyle(.roundedBorder)
+                        .onSubmit(saveCredential)
+                    Button("Salvar") { saveCredential() }
+                        .disabled(!canSaveCredential)
+                }
+                HStack(spacing: 10) {
+                    Button("Criar token") {
+                        if let url = credentialKind.tokenPage(host: credentialHost, organization: credentialOrganization) {
+                            NSWorkspace.shared.open(url)
+                        }
+                    }
+                    if let command = credentialKind.loginCommand(host: credentialHost), let cli = credentialKind.cliName {
+                        Button("Instalar \(cli) e entrar") {
+                            model.terminals.open(path: NSHomeDirectory(), command: command, title: "\(cli) · login")
+                        }
+                        .help("Instala a CLI com o Homebrew (se faltar) e abre o login no terminal do Trama")
+                    }
+                }
+                if let credentialMessage {
+                    Text(credentialMessage)
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                }
+            } header: {
+                Text("Contas Git")
+            } footer: {
+                Text("O token fica no Keychain e é usado nos pushes por HTTPS e nos comandos da CLI do provedor (gh, glab, az). Para GitHub Enterprise ou GitLab próprio, troque o servidor. O login pela CLI serve para entrar pelo navegador; os pushes do Trama usam o token.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -174,6 +245,42 @@ struct PreferencesView: View {
             localError = errorMessage(error)
         }
         reload()
+    }
+
+    var canSaveCredential: Bool {
+        !credentialBusy
+            && !credentialToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && !credentialHost.trimmingCharacters(in: .whitespaces).isEmpty
+            && (!credentialKind.needsUsername || !credentialUser.trimmingCharacters(in: .whitespaces).isEmpty)
+    }
+
+    func saveCredential() {
+        guard canSaveCredential else { return }
+        var host = credentialHost.trimmingCharacters(in: .whitespaces).lowercased()
+        for prefix in ["https://", "http://"] where host.hasPrefix(prefix) { host.removeFirst(prefix.count) }
+        host = host.split(separator: "/").first.map(String.init) ?? host
+        var credential = GitCredential(
+            kind: credentialKind,
+            host: host,
+            username: credentialKind.needsUsername ? credentialUser.trimmingCharacters(in: .whitespaces) : nil,
+            token: credentialToken.trimmingCharacters(in: .whitespacesAndNewlines)
+        )
+        let organization = credentialOrganization
+        credentialBusy = true
+        credentialMessage = nil
+        Task {
+            do {
+                let account = try await GitCredentials.validate(credential, organization: organization)
+                if credential.username == nil { credential.username = account.map { "@\($0)" } }
+                try GitCredentials.save(credential)
+                credentials = GitCredentials.all()
+                credentialToken = ""
+                if account == nil { credentialMessage = "Token guardado, mas não consegui conferi-lo." }
+            } catch {
+                credentialMessage = error.localizedDescription
+            }
+            credentialBusy = false
+        }
     }
 
     func saveDefaultBranch() {

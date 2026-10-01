@@ -122,6 +122,53 @@ final class PullRequestPlanner: ObservableObject {
         replan()
     }
 
+    private func reposFor(_ branch: String, scope: String?) -> [String] {
+        scope.map { [$0] } ?? options.first(where: { $0.name == branch })?.repos ?? []
+    }
+
+    func createBranch(_ name: String, from source: String, scope: String?) async -> String? {
+        let slug = self.slug
+        var repos = reposFor(source, scope: scope)
+        let taken = Set(options.first(where: { $0.name == name })?.repos ?? [])
+        repos.removeAll { taken.contains($0) }
+        do {
+            try await Core.run { try $0.createRemoteBranch(slug, name: name, from: source, repos: repos) }
+        } catch {
+            return errorMessage(error)
+        }
+        await refresh()
+        if let scope { choose(name, for: scope) } else { chooseForAll(name) }
+        return nil
+    }
+
+    func renameBranch(_ old: String, to new: String, scope: String?) async -> String? {
+        let slug = self.slug
+        let repos = reposFor(old, scope: scope)
+        do {
+            try await Core.run { try $0.renameRemoteBranch(slug, from: old, to: new, repos: repos) }
+        } catch {
+            return errorMessage(error)
+        }
+        for name in repos where targets[name] == old { targets[name] = new }
+        if chosenForAll == old { chosenForAll = new }
+        await refresh()
+        return nil
+    }
+
+    func deleteBranch(_ branch: String, scope: String?) async -> String? {
+        let slug = self.slug
+        let repos = reposFor(branch, scope: scope)
+        do {
+            try await Core.run { try $0.deleteRemoteBranch(slug, name: branch, repos: repos) }
+        } catch {
+            return errorMessage(error)
+        }
+        for name in repos where targets[name] == branch { targets[name] = defaults[name] }
+        if chosenForAll == branch { chosenForAll = nil }
+        await refresh()
+        return nil
+    }
+
     func toggle(_ repo: String) {
         if excluded.contains(repo) {
             excluded.remove(repo)
@@ -271,7 +318,8 @@ struct PullRequestSheet: View {
                         selected: planner.shownForAll,
                         totalRepos: planner.repoCount,
                         scopedRepo: nil,
-                        defaultNames: planner.defaultNames
+                        defaultNames: planner.defaultNames,
+                        planner: planner
                     ) { name in
                         planner.chooseForAll(name)
                         pickingForAll = false
@@ -551,7 +599,8 @@ private struct PullRequestRowView: View {
                             selected: row.target,
                             totalRepos: planner.repoCount,
                             scopedRepo: row.repo,
-                            defaultNames: planner.defaultNames
+                            defaultNames: planner.defaultNames,
+                            planner: planner
                         ) { name in
                             planner.choose(name, for: row.repo)
                             picking = false
@@ -705,8 +754,21 @@ private struct BranchPicker: View {
     let totalRepos: Int
     let scopedRepo: String?
     let defaultNames: Set<String>
+    @ObservedObject var planner: PullRequestPlanner
     let onPick: (String) -> Void
     @State private var query = ""
+    @State private var mode = Mode.list
+    @State private var text = ""
+    @State private var source = ""
+    @State private var working = false
+    @State private var problem: String?
+
+    enum Mode: Equatable {
+        case list
+        case create
+        case rename(String)
+        case delete(String)
+    }
 
     var visible: [RemoteBranchOption] {
         let q = query.trimmingCharacters(in: .whitespaces)
@@ -721,6 +783,21 @@ private struct BranchPicker: View {
     var stacks: [RemoteBranchOption] { visible.filter { $0.isTrama } }
 
     var body: some View {
+        Group {
+            switch mode {
+            case .list: listBody
+            case .create: form(title: "Nova branch", field: "Nome da branch", action: "Criar", sourcePicker: true)
+            case .rename(let name): form(title: "Renomear \(name)", field: "Novo nome", action: "Renomear", sourcePicker: false)
+            case .delete(let name): confirmation(name)
+            }
+        }
+        .padding(8)
+        .frame(width: 372)
+        .background(Theme.surface)
+        .preferredColorScheme(.dark)
+    }
+
+    var listBody: some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 8) {
                 Image(systemName: "magnifyingglass")
@@ -777,14 +854,178 @@ private struct BranchPicker: View {
                 .padding(.top, 8)
                 .padding(.bottom, 4)
             }
+            Rectangle().fill(Theme.line).frame(height: 1).padding(.vertical, 4)
+            Button {
+                text = query.trimmingCharacters(in: .whitespaces)
+                source = selected ?? options.first?.name ?? ""
+                problem = nil
+                mode = .create
+            } label: {
+                Label("Nova branch…", systemImage: "plus")
+                    .font(.system(size: 12.5))
+                    .foregroundStyle(Theme.emberLight)
+                    .padding(.horizontal, 10)
+                    .frame(maxWidth: .infinity, minHeight: 32, alignment: .leading)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
         }
-        .padding(8)
-        .frame(width: 372)
-        .background(Theme.surface)
-        .preferredColorScheme(.dark)
+    }
+
+    func form(title: String, field: String, action: String, sourcePicker: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(title)
+                .font(.system(size: 13, weight: .semibold))
+                .lineLimit(1)
+                .truncationMode(.middle)
+            TextField(field, text: $text)
+                .textFieldStyle(.plain)
+                .font(Theme.mono(12.5))
+                .padding(.horizontal, 10)
+                .frame(height: 34)
+                .background(RoundedRectangle(cornerRadius: 8).fill(Theme.background))
+                .overlay(RoundedRectangle(cornerRadius: 8).stroke(Theme.line, lineWidth: 1))
+                .onSubmit(submitForm)
+            if sourcePicker {
+                HStack(spacing: 8) {
+                    Text("a partir de")
+                        .font(.system(size: 12))
+                        .foregroundStyle(Theme.faded)
+                    Picker("", selection: $source) {
+                        ForEach(options) { Text($0.name).tag($0.name) }
+                    }
+                    .labelsHidden()
+                }
+            }
+            scopeNote
+            if let problem {
+                Text(problem)
+                    .font(.system(size: 11.5))
+                    .foregroundStyle(Theme.waitText)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            HStack {
+                Spacer()
+                Button("Voltar") { mode = .list }
+                    .buttonStyle(GhostButton())
+                    .disabled(working)
+                Button(action: submitForm) {
+                    HStack(spacing: 8) {
+                        if working { ProgressView().controlSize(.small) }
+                        Text(action)
+                    }
+                }
+                .buttonStyle(EmberButton())
+                .disabled(working || text.trimmingCharacters(in: .whitespaces).isEmpty)
+            }
+        }
+        .padding(10)
+    }
+
+    func confirmation(_ name: String) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Excluir \(name)?")
+                .font(.system(size: 13, weight: .semibold))
+                .lineLimit(1)
+                .truncationMode(.middle)
+            Text("A branch é removida do remoto. PRs abertos que apontam para ela serão fechados pelo provedor.")
+                .font(.system(size: 12))
+                .foregroundStyle(Theme.faded)
+                .fixedSize(horizontal: false, vertical: true)
+            scopeNote
+            if let problem {
+                Text(problem)
+                    .font(.system(size: 11.5))
+                    .foregroundStyle(Theme.waitText)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            HStack {
+                Spacer()
+                Button("Voltar") { mode = .list }
+                    .buttonStyle(GhostButton())
+                    .disabled(working)
+                Button(action: submitForm) {
+                    HStack(spacing: 8) {
+                        if working { ProgressView().controlSize(.small) }
+                        Text("Excluir")
+                    }
+                }
+                .buttonStyle(EmberButton())
+                .disabled(working)
+            }
+        }
+        .padding(10)
+    }
+
+    @ViewBuilder
+    var scopeNote: some View {
+        if let scopedRepo {
+            Text("Só em \(scopedRepo).")
+                .font(.system(size: 11.5))
+                .foregroundStyle(Theme.faded)
+        } else {
+            Text("Em todos os repositórios que têm a branch de origem.")
+                .font(.system(size: 11.5))
+                .foregroundStyle(Theme.faded)
+        }
+    }
+
+    func submitForm() {
+        guard !working else { return }
+        let value = text.trimmingCharacters(in: .whitespaces)
+        let current = mode
+        let scope = scopedRepo
+        let from = source
+        working = true
+        problem = nil
+        Task {
+            let failure: String?
+            switch current {
+            case .list: failure = nil
+            case .create: failure = await planner.createBranch(value, from: from, scope: scope)
+            case .rename(let old): failure = await planner.renameBranch(old, to: value, scope: scope)
+            case .delete(let name): failure = await planner.deleteBranch(name, scope: scope)
+            }
+            working = false
+            problem = failure
+            guard failure == nil else { return }
+            if current == .create {
+                onPick(value)
+            } else {
+                mode = .list
+            }
+        }
     }
 
     func item(_ option: RemoteBranchOption) -> some View {
+        HStack(spacing: 2) {
+            pickButton(option)
+            if !defaultNames.contains(option.name) {
+                Menu {
+                    Button("Renomear…") {
+                        text = option.name
+                        problem = nil
+                        mode = .rename(option.name)
+                    }
+                    Button("Excluir…", role: .destructive) {
+                        problem = nil
+                        mode = .delete(option.name)
+                    }
+                } label: {
+                    Image(systemName: "ellipsis")
+                        .font(.system(size: 12))
+                        .foregroundStyle(Theme.faded)
+                        .frame(width: 24, height: 30)
+                        .contentShape(Rectangle())
+                }
+                .menuStyle(.borderlessButton)
+                .menuIndicator(.hidden)
+                .fixedSize()
+            }
+        }
+    }
+
+    func pickButton(_ option: RemoteBranchOption) -> some View {
         let isSelected = option.name == selected
         return Button {
             onPick(option.name)
