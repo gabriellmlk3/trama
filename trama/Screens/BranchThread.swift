@@ -1,11 +1,11 @@
 import Foundation
 import SwiftUI
 
-private enum NodeStyle {
+enum NodeStyle {
     case hollow, baseTip, commit, head, dirty
 }
 
-private struct ThreadNode: View {
+struct ThreadNode: View {
     let style: NodeStyle
     let appeared: Bool
     let delay: Double
@@ -50,10 +50,6 @@ enum ThreadLayout: String, CaseIterable {
     static let storageKey = "branchThreadLayout"
 }
 
-enum ThreadLane {
-    case base, trama
-}
-
 struct BranchThread: View {
     let overview: GitOverview
     let status: RepoStatus
@@ -65,12 +61,8 @@ struct BranchThread: View {
     private let topY: CGFloat = 50
     private let bottomY: CGFloat = 116
     private let step: CGFloat = 46
-    private let baseX: CGFloat = 100
-    private let tramaX: CGFloat = 250
-    private let verticalStart: CGFloat = 58
 
     var layout: ThreadLayout { ThreadLayout(rawValue: layoutName) ?? .horizontal }
-    var vertical: Bool { layout == .vertical }
 
     var key: String {
         "\(layout.rawValue)-\(overview.head?.hash ?? "")-\(overview.aheadCount)-\(overview.behindCount)-\(overview.changes.isEmpty)"
@@ -78,35 +70,11 @@ struct BranchThread: View {
 
     var behindShown: [Commit] { Array(overview.behind.prefix(2).reversed()) }
     var aheadShown: [Commit] { Array(overview.ahead.prefix(4).reversed()) }
-    var forkA: CGFloat { vertical ? verticalStart : labelWidth + 18 }
-    var startA: CGFloat { vertical ? 34 : labelWidth - 6 }
+    var forkX: CGFloat { labelWidth + 18 }
     var agent: Agent? { status.agents.first(where: { $0.isWorking }) }
 
-    func topA(_ i: Int) -> CGFloat { forkA + CGFloat(i) * step }
-    func bottomA(_ j: Int) -> CGFloat { forkA + CGFloat(j + 1) * step }
-
-    func cross(_ lane: ThreadLane) -> CGFloat {
-        switch (lane, vertical) {
-        case (.base, false): return topY
-        case (.trama, false): return bottomY
-        case (.base, true): return baseX
-        case (.trama, true): return tramaX
-        }
-    }
-
-    func pt(_ along: CGFloat, _ lane: ThreadLane) -> CGPoint {
-        point(along, cross(lane))
-    }
-
-    func point(_ along: CGFloat, _ cross: CGFloat) -> CGPoint {
-        vertical ? CGPoint(x: cross, y: along) : CGPoint(x: along, y: cross)
-    }
-
-    var canvasHeight: CGFloat {
-        guard vertical else { return 152 }
-        let rows = max(behindShown.count + 1, aheadShown.count + (overview.changes.isEmpty ? 0 : 1) + 1)
-        return verticalStart + CGFloat(rows) * step + 44
-    }
+    func topX(_ i: Int) -> CGFloat { forkX + CGFloat(i) * step }
+    func bottomX(_ j: Int) -> CGFloat { forkX + CGFloat(j + 1) * step }
 
     var body: some View {
         GitCard {
@@ -115,10 +83,12 @@ struct BranchThread: View {
                     Text("O fio desta branch")
                         .font(.system(size: 12.5, weight: .semibold))
                     Spacer()
-                    Text("cada ponto é um commit")
-                        .font(.system(size: 11.5))
-                        .foregroundStyle(Theme.faded)
-                        .lineLimit(1)
+                    if layout == .horizontal {
+                        Text("cada ponto é um commit")
+                            .font(.system(size: 11.5))
+                            .foregroundStyle(Theme.faded)
+                            .lineLimit(1)
+                    }
                     Picker("Layout do fio", selection: $layoutName) {
                         Image(systemName: "arrow.right").tag(ThreadLayout.horizontal.rawValue)
                         Image(systemName: "arrow.down").tag(ThreadLayout.vertical.rawValue)
@@ -130,28 +100,33 @@ struct BranchThread: View {
                 }
                 .padding(.horizontal, 14)
                 .padding(.top, 13)
-                canvas
-                    .frame(height: canvasHeight)
-                    .id(key)
+                Group {
+                    if layout == .horizontal {
+                        canvas.frame(height: 152)
+                    } else {
+                        BranchThreadColumn(overview: overview, status: status)
+                    }
+                }
+                .id(key)
             }
         }
-        .frame(minWidth: vertical ? 330 : 380)
+        .frame(minWidth: layout == .horizontal ? 380 : 300)
         .layoutPriority(1)
     }
 
     var canvas: some View {
         GeometryReader { geo in
-            let topLast = topA(behindShown.count)
+            let topLast = topX(behindShown.count)
             let hasAhead = !aheadShown.isEmpty
-            let bottomLast = hasAhead ? bottomA(aheadShown.count - 1) : forkA
-            let dirtyA = (hasAhead ? bottomLast : forkA) + step
-            let baseEnd = vertical ? min(geo.size.height - 24, topLast + 34) : min(geo.size.width - 150, topLast + 34)
+            let bottomLast = hasAhead ? bottomX(aheadShown.count - 1) : forkX
+            let dirtyX = (hasAhead ? bottomLast : forkX) + step
             ZStack(alignment: .topLeading) {
-                laneLabels
+                lane(label: "origin/\(overview.base)", y: topY)
+                lane(label: "trama", y: bottomY, ember: true)
 
                 Path { p in
-                    p.move(to: pt(startA, .base))
-                    p.addLine(to: pt(baseEnd, .base))
+                    p.move(to: CGPoint(x: labelWidth - 6, y: topY))
+                    p.addLine(to: CGPoint(x: min(geo.size.width - 150, topLast + 34), y: topY))
                 }
                 .trim(from: 0, to: drawn ? 1 : 0)
                 .stroke(Theme.thread, style: StrokeStyle(lineWidth: 2, lineCap: .round))
@@ -159,13 +134,13 @@ struct BranchThread: View {
 
                 Path { p in
                     guard hasAhead || !overview.changes.isEmpty else { return }
-                    p.move(to: pt(forkA, .base))
+                    p.move(to: CGPoint(x: forkX, y: topY))
                     p.addCurve(
-                        to: pt(forkA + 22, .trama),
-                        control1: point(forkA, cross(.base) + 34),
-                        control2: pt(forkA + 4, .trama)
+                        to: CGPoint(x: forkX + 22, y: bottomY),
+                        control1: CGPoint(x: forkX, y: topY + 34),
+                        control2: CGPoint(x: forkX + 4, y: bottomY)
                     )
-                    p.addLine(to: pt(hasAhead ? bottomLast : forkA + 22, .trama))
+                    p.addLine(to: CGPoint(x: hasAhead ? bottomLast : forkX + 22, y: bottomY))
                 }
                 .trim(from: 0, to: drawn ? 1 : 0)
                 .stroke(Theme.ember, style: StrokeStyle(lineWidth: 2.2, lineCap: .round, lineJoin: .round))
@@ -174,8 +149,8 @@ struct BranchThread: View {
 
                 if overview.changes.count > 0 {
                     Path { p in
-                        p.move(to: pt(hasAhead ? bottomLast : forkA + 22, .trama))
-                        p.addLine(to: pt(dirtyA, .trama))
+                        p.move(to: CGPoint(x: hasAhead ? bottomLast : forkX + 22, y: bottomY))
+                        p.addLine(to: CGPoint(x: dirtyX, y: bottomY))
                     }
                     .stroke(Theme.emberLight.opacity(0.6), style: StrokeStyle(lineWidth: 1.5, dash: [3, 3]))
                     .opacity(drawn ? 1 : 0)
@@ -183,28 +158,28 @@ struct BranchThread: View {
                 }
 
                 ThreadNode(style: .hollow, appeared: drawn, delay: 0.1)
-                    .position(pt(topA(0), .base))
+                    .position(x: topX(0), y: topY)
                 ForEach(Array(behindShown.enumerated()), id: \.offset) { i, c in
                     ThreadNode(style: i == behindShown.count - 1 ? .baseTip : .hollow, appeared: drawn, delay: 0.25 + Double(i) * 0.1)
-                        .position(pt(topA(i + 1), .base))
+                        .position(x: topX(i + 1), y: topY)
                         .help(c.subject)
                 }
                 ForEach(Array(aheadShown.enumerated()), id: \.offset) { j, c in
                     let isHead = j == aheadShown.count - 1
                     ThreadNode(style: isHead ? .head : .commit, appeared: drawn, delay: 0.55 + Double(j) * 0.1)
-                        .position(pt(bottomA(j), .trama))
+                        .position(x: bottomX(j), y: bottomY)
                         .help(c.subject)
                 }
                 if !hasAhead {
                     ThreadNode(style: .head, appeared: drawn, delay: 0.3)
-                        .position(pt(topA(0), .base))
+                        .position(x: topX(0), y: topY)
                 }
                 if overview.changes.count > 0 {
                     ThreadNode(style: .dirty, appeared: drawn, delay: 1.0)
-                        .position(pt(dirtyA, .trama))
+                        .position(x: dirtyX, y: bottomY)
                 }
 
-                annotations(topLast: topLast, bottomLast: bottomLast, dirtyA: dirtyA, hasAhead: hasAhead, width: geo.size.width)
+                annotations(topLast: topLast, bottomLast: bottomLast, dirtyX: dirtyX, hasAhead: hasAhead, width: geo.size.width)
                     .opacity(drawn ? 1 : 0)
                     .animation(.easeIn(duration: 0.4).delay(0.8), value: drawn)
             }
@@ -212,92 +187,57 @@ struct BranchThread: View {
         .onAppear { drawn = true }
     }
 
-    @ViewBuilder var laneLabels: some View {
-        if vertical {
-            laneLabel("origin/\(overview.base)", at: CGPoint(x: baseX, y: 14), width: 130, ember: false)
-            laneLabel("trama", at: CGPoint(x: tramaX, y: 14), width: 130, ember: true)
-        } else {
-            laneLabel("origin/\(overview.base)", at: CGPoint(x: 14 + (labelWidth - 22) / 2, y: topY), width: labelWidth - 22, ember: false, leading: true)
-            laneLabel("trama", at: CGPoint(x: 14 + (labelWidth - 22) / 2, y: bottomY), width: labelWidth - 22, ember: true, leading: true)
-        }
-    }
-
-    func laneLabel(_ label: String, at center: CGPoint, width: CGFloat, ember: Bool, leading: Bool = false) -> some View {
+    func lane(label: String, y: CGFloat, ember: Bool = false) -> some View {
         Text(label)
             .font(Theme.mono(11))
             .foregroundStyle(ember ? Theme.emberLight : Theme.faded)
             .lineLimit(1)
             .truncationMode(.middle)
-            .frame(width: width, alignment: leading ? .leading : .center)
-            .position(center)
+            .frame(width: labelWidth - 22, alignment: .leading)
+            .position(x: 14 + (labelWidth - 22) / 2, y: y)
     }
 
-    @ViewBuilder func annotations(topLast: CGFloat, bottomLast: CGFloat, dirtyA: CGFloat, hasAhead: Bool, width: CGFloat) -> some View {
+    @ViewBuilder func annotations(topLast: CGFloat, bottomLast: CGFloat, dirtyX: CGFloat, hasAhead: Bool, width: CGFloat) -> some View {
         if let tip = overview.baseTip, !behindShown.isEmpty {
-            nodeLabel(tip.hash, along: topLast, lane: .base, color: Theme.waitText, side: .before)
+            nodeLabel(tip.hash, x: topLast - 14, y: topY - 22, color: Theme.waitText)
         }
         if let mb = overview.mergeBase, hasAhead {
-            nodeLabel("saiu daqui · \(mb.hash)", along: forkA, lane: .base, side: .after)
+            nodeLabel("saiu daqui · \(mb.hash)", x: forkX + 14, y: topY + 22)
         }
         if overview.behindCount > 0 {
-            let chip = sideChip("↓\(overview.behindCount) · \(overview.base) andou", tone: Theme.wait, text: Theme.waitText)
-            if vertical {
-                chip.position(x: baseX, y: topLast + 38)
-            } else {
-                chip.position(x: min(width - 76, topLast + 100), y: topY)
-            }
+            sideChip("↓\(overview.behindCount) · \(overview.base) andou", tone: Theme.wait, text: Theme.waitText)
+                .position(x: min(width - 76, topLast + 100), y: topY)
         }
         if overview.aheadCount > 0 {
-            let chip = sideChip("↑\(overview.aheadCount) à frente", tone: Theme.ember, text: Theme.emberLight)
-            let last = overview.changes.isEmpty ? bottomLast : dirtyA
-            if vertical {
-                chip.position(x: tramaX, y: last + 38)
-            } else {
-                chip.position(x: min(width - 52, last + 62), y: bottomY)
-            }
+            sideChip("↑\(overview.aheadCount) à frente", tone: Theme.ember, text: Theme.emberLight)
+                .position(x: min(width - 52, (overview.changes.isEmpty ? bottomLast : dirtyX) + 62), y: bottomY)
         }
         if let agent, hasAhead {
-            let capsule = Text("agente aqui")
+            Text("agente aqui")
                 .font(.system(size: 10.5))
                 .foregroundStyle(Theme.irisText)
                 .padding(.horizontal, 8)
                 .frame(height: 20)
                 .background(Capsule().fill(Theme.iris.opacity(0.14)))
                 .overlay(Capsule().stroke(Theme.iris.opacity(0.4), lineWidth: 1))
+                .position(x: bottomLast - 6, y: bottomY - 26)
                 .help(agent.message ?? "")
-            if vertical {
-                capsule.position(x: tramaX + 56, y: bottomLast + 22)
-            } else {
-                capsule.position(x: bottomLast - 6, y: bottomY - 26)
-            }
         }
         if let head = overview.head {
             if hasAhead {
-                nodeLabel("HEAD · \(head.hash)", along: bottomLast, lane: .trama, side: .after, horizontalShift: -24)
+                nodeLabel("HEAD · \(head.hash)", x: bottomLast - 10, y: bottomY + 22)
             } else {
-                nodeLabel("HEAD · \(head.hash)", along: topA(0), lane: .base, side: .before, horizontalShift: 4)
+                nodeLabel("HEAD · \(head.hash)", x: topX(0) - 10, y: topY - 22)
             }
         }
     }
 
-    enum LabelSide { case before, after }
-
-    @ViewBuilder func nodeLabel(_ text: String, along: CGFloat, lane: ThreadLane, color: Color = Theme.text3, side: LabelSide, horizontalShift: CGFloat = 0) -> some View {
-        let label = Text(text)
+    func nodeLabel(_ text: String, x: CGFloat, y: CGFloat, color: Color = Theme.text3) -> some View {
+        Text(text)
             .font(Theme.mono(11))
             .foregroundStyle(color)
-            .lineLimit(1)
-            .truncationMode(.middle)
-        if vertical {
-            if lane == .base {
-                label.frame(width: 84, alignment: .trailing).position(x: baseX - 14 - 42, y: along)
-            } else {
-                label.frame(width: 90, alignment: .leading).position(x: tramaX + 14 + 45, y: along)
-            }
-        } else {
-            let y = cross(lane) + (side == .before ? -22 : 22)
-            label.fixedSize().offset(x: along + (side == .before ? -14 : 14) + horizontalShift, y: y - 8)
-        }
+            .fixedSize()
+            .offset(x: x, y: y - 8)
     }
 
     func sideChip(_ text: String, tone: Color, text color: Color) -> some View {
@@ -309,5 +249,190 @@ struct BranchThread: View {
             .frame(height: 24)
             .background(RoundedRectangle(cornerRadius: 7).fill(tone.opacity(0.12)))
             .overlay(RoundedRectangle(cornerRadius: 7).stroke(tone.opacity(0.5), lineWidth: 1))
+    }
+}
+
+struct ThreadRow: Identifiable {
+    enum Lane { case base, trama }
+
+    var id: Int
+    var lane: Lane
+    var style: NodeStyle
+    var tag: String?
+    var hash: String?
+    var subject: String
+    var tone: Color = Theme.text3
+    var showsAgent = false
+}
+
+struct BranchThreadColumn: View {
+    let overview: GitOverview
+    let status: RepoStatus
+
+    @State private var drawn = false
+
+    private let baseX: CGFloat = 24
+    private let tramaX: CGFloat = 60
+    private let textX: CGFloat = 92
+    private let headerHeight: CGFloat = 58
+    private let rowHeight: CGFloat = 36
+
+    var behindShown: [Commit] { Array(overview.behind.prefix(2).reversed()) }
+    var aheadShown: [Commit] { Array(overview.ahead.prefix(4).reversed()) }
+    var agent: Agent? { status.agents.first(where: { $0.isWorking }) }
+    var hasAhead: Bool { !aheadShown.isEmpty }
+    var hasDirty: Bool { !overview.changes.isEmpty }
+
+    var rows: [ThreadRow] {
+        var out: [ThreadRow] = []
+        func add(_ lane: ThreadRow.Lane, _ style: NodeStyle, tag: String? = nil, hash: String? = nil, subject: String = "", tone: Color = Theme.text3, agent: Bool = false) {
+            out.append(ThreadRow(id: out.count, lane: lane, style: style, tag: tag, hash: hash, subject: subject, tone: tone, showsAgent: agent))
+        }
+        let fork = overview.mergeBase
+        if hasAhead || !behindShown.isEmpty {
+            add(.base, .hollow, tag: "saiu daqui", hash: fork?.hash, subject: fork?.subject ?? "")
+        } else if let head = overview.head {
+            add(.base, .head, tag: "HEAD", hash: head.hash, subject: head.subject, tone: Theme.emberLight)
+        }
+        for (i, c) in behindShown.enumerated() {
+            let tip = i == behindShown.count - 1
+            add(.base, tip ? .baseTip : .hollow, hash: c.hash, subject: c.subject, tone: tip ? Theme.waitText : Theme.text3)
+        }
+        for (j, c) in aheadShown.enumerated() {
+            let isHead = j == aheadShown.count - 1
+            add(.trama, isHead ? .head : .commit, tag: isHead ? "HEAD" : nil, hash: c.hash, subject: c.subject, tone: isHead ? Theme.emberLight : Theme.text3, agent: isHead && agent != nil)
+        }
+        if hasDirty {
+            let n = overview.changes.count
+            add(.trama, .dirty, subject: "\(n) \(plural(n, "alteração", "alterações")) sem commit", tone: Theme.emberLight)
+        }
+        return out
+    }
+
+    func y(_ index: Int) -> CGFloat { headerHeight + (CGFloat(index) + 0.5) * rowHeight }
+    func x(_ lane: ThreadRow.Lane) -> CGFloat { lane == .base ? baseX : tramaX }
+
+    var body: some View {
+        let list = rows
+        GeometryReader { geo in
+            ZStack(alignment: .topLeading) {
+                legend
+                    .opacity(drawn ? 1 : 0)
+                    .animation(.easeIn(duration: 0.4).delay(0.2), value: drawn)
+                lines(list)
+                ForEach(list) { row in
+                    ThreadNode(style: row.style, appeared: drawn, delay: 0.1 + Double(row.id) * 0.1)
+                        .position(x: x(row.lane), y: y(row.id))
+                    rowText(row)
+                        .frame(width: max(40, geo.size.width - textX - 14), alignment: .leading)
+                        .position(x: textX + max(40, geo.size.width - textX - 14) / 2, y: y(row.id))
+                        .opacity(drawn ? 1 : 0)
+                        .animation(.easeIn(duration: 0.35).delay(0.3 + Double(row.id) * 0.1), value: drawn)
+                }
+            }
+            .onAppear { drawn = true }
+        }
+        .frame(height: headerHeight + CGFloat(list.count) * rowHeight + 14)
+    }
+
+    var legend: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            legendLine(color: Theme.thread, name: "origin/\(overview.base)", note: overview.behindCount > 0 ? "↓\(overview.behindCount) andou" : nil, tone: Theme.waitText)
+            legendLine(color: Theme.ember, name: "trama", note: overview.aheadCount > 0 ? "↑\(overview.aheadCount) à frente" : nil, tone: Theme.emberLight)
+        }
+        .padding(.leading, 14)
+        .padding(.top, 10)
+    }
+
+    func legendLine(color: Color, name: String, note: String?, tone: Color) -> some View {
+        HStack(spacing: 8) {
+            Capsule().fill(color).frame(width: 16, height: 3)
+            Text(name)
+                .font(Theme.mono(11))
+                .foregroundStyle(color == Theme.ember ? Theme.emberLight : Theme.faded)
+                .lineLimit(1)
+                .truncationMode(.middle)
+            if let note {
+                Text(note)
+                    .font(Theme.mono(11))
+                    .foregroundStyle(tone)
+            }
+        }
+    }
+
+    func lines(_ list: [ThreadRow]) -> some View {
+        let baseRows = list.filter { $0.lane == .base }
+        let tramaRows = list.filter { $0.lane == .trama }
+        let forkY = y(0)
+        return ZStack {
+            Path { p in
+                guard let last = baseRows.last, baseRows.count > 1 else { return }
+                p.move(to: CGPoint(x: baseX, y: forkY))
+                p.addLine(to: CGPoint(x: baseX, y: y(last.id)))
+            }
+            .trim(from: 0, to: drawn ? 1 : 0)
+            .stroke(Theme.thread, style: StrokeStyle(lineWidth: 2, lineCap: .round))
+            .animation(.easeOut(duration: 0.7), value: drawn)
+
+            Path { p in
+                guard let last = tramaRows.last(where: { $0.style != .dirty }) ?? tramaRows.last, hasAhead || hasDirty else { return }
+                p.move(to: CGPoint(x: baseX, y: forkY))
+                p.addCurve(
+                    to: CGPoint(x: tramaX, y: forkY + 28),
+                    control1: CGPoint(x: baseX, y: forkY + 20),
+                    control2: CGPoint(x: tramaX, y: forkY + 8)
+                )
+                p.addLine(to: CGPoint(x: tramaX, y: hasAhead ? y(last.id) : forkY + 28))
+            }
+            .trim(from: 0, to: drawn ? 1 : 0)
+            .stroke(Theme.ember, style: StrokeStyle(lineWidth: 2.2, lineCap: .round, lineJoin: .round))
+            .shadow(color: Theme.ember.opacity(0.35), radius: 4)
+            .animation(.easeInOut(duration: 0.95).delay(0.25), value: drawn)
+
+            Path { p in
+                guard hasDirty, let dirty = tramaRows.last else { return }
+                p.move(to: CGPoint(x: tramaX, y: hasAhead ? y(dirty.id - 1) : forkY + 28))
+                p.addLine(to: CGPoint(x: tramaX, y: y(dirty.id)))
+            }
+            .stroke(Theme.emberLight.opacity(0.6), style: StrokeStyle(lineWidth: 1.5, dash: [3, 3]))
+            .opacity(drawn ? 1 : 0)
+            .animation(.easeIn(duration: 0.3).delay(1.1), value: drawn)
+        }
+    }
+
+    func rowText(_ row: ThreadRow) -> some View {
+        HStack(spacing: 7) {
+            if let tag = row.tag {
+                Text(tag)
+                    .font(.system(size: 10.5, weight: .medium))
+                    .foregroundStyle(row.style == .head ? Theme.emberText : Theme.text3)
+                    .padding(.horizontal, 6)
+                    .frame(height: 18)
+                    .background(Capsule().fill((row.style == .head ? Theme.ember : Theme.faded).opacity(0.14)))
+                    .fixedSize()
+            }
+            if let hash = row.hash {
+                Text(hash)
+                    .font(Theme.mono(11))
+                    .foregroundStyle(row.tone)
+                    .fixedSize()
+            }
+            Text(row.subject)
+                .font(.system(size: 11.5))
+                .foregroundStyle(row.style == .dirty ? Theme.emberLight : Theme.faded)
+                .lineLimit(1)
+                .truncationMode(.tail)
+            if row.showsAgent, let agent {
+                Text("agente aqui")
+                    .font(.system(size: 10.5))
+                    .foregroundStyle(Theme.irisText)
+                    .padding(.horizontal, 7)
+                    .frame(height: 18)
+                    .background(Capsule().fill(Theme.iris.opacity(0.14)))
+                    .overlay(Capsule().stroke(Theme.iris.opacity(0.4), lineWidth: 1))
+                    .fixedSize()
+                    .help(agent.message ?? "")
+            }
+        }
     }
 }
