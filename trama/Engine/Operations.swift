@@ -402,6 +402,21 @@ extension Workspace {
         return updated
     }
 
+    public func remove(_ slug: String, force: Bool = false, deleteBranches: Bool = false) throws -> Trama {
+        var t = try trama(slug)
+        if !t.isArchived { t = try archive(t.slug, force: force) }
+        if deleteBranches {
+            for name in t.repos {
+                guard let r = try? repo(name), Git.branchExists(r.path, t.branch) else { continue }
+                _ = Git.execute(r.path, ["branch", "-D", t.branch])
+            }
+        }
+        try withLock {
+            try saveTramas(try tramas().filter { $0.slug != t.slug })
+        }
+        return t
+    }
+
     public func locate(_ folder: String) throws -> (trama: Trama, repo: RepoConfig?) {
         let notInside = TramaError("esta pasta não está dentro de uma trama")
         guard let rel = Paths.relative(Paths.real(Paths.absolute(folder)), within: Paths.real(root)), !rel.isEmpty else {

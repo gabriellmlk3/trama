@@ -1071,7 +1071,7 @@ private struct BranchPicker: View {
                     Image(systemName: "ellipsis")
                         .font(.system(size: 12))
                         .foregroundStyle(Theme.faded)
-                        .frame(width: 24, height: 30)
+                        .frame(width: 30, height: 30)
                         .contentShape(Rectangle())
                 }
                 .menuStyle(.borderlessButton)

@@ -1,7 +1,41 @@
 import Foundation
 import SwiftUI
 
+enum DiscardRequest: Identifiable {
+    case files([FileChange])
+    case lines(FileChange, Set<Int>)
+
+    var id: String {
+        switch self {
+        case .files(let list): return "files:" + list.map(\.path).joined(separator: "|")
+        case .lines(let c, let ids): return "lines:\(c.path):" + ids.sorted().map(String.init).joined(separator: ",")
+        }
+    }
+
+    var title: String {
+        switch self {
+        case .files(let list):
+            if list.count == 1 { return "Descartar mudanças de “\(list[0].name)”?" }
+            return "Descartar as mudanças de \(list.count) arquivos?"
+        case .lines(_, let ids):
+            return "Descartar \(ids.count) \(plural(ids.count, "linha", "linhas"))?"
+        }
+    }
+
+    var message: String {
+        switch self {
+        case .files(let list):
+            let fresh = list.filter { $0.code == "N" }.count
+            let tail = fresh > 0 ? " Arquivos novos vão para a Lixeira." : ""
+            return "O conteúdo volta ao último commit e o que foi escrito se perde.\(tail)"
+        case .lines:
+            return "As linhas escolhidas voltam ao último commit e o que foi escrito se perde."
+        }
+    }
+}
+
 struct ChangesPane: View {
+    @EnvironmentObject var model: AppModel
     let trama: LiveTrama
     let repo: String
     let merging: Bool
@@ -12,11 +46,33 @@ struct ChangesPane: View {
     let status: RepoStatus
 
     @State private var unchecked: Set<String> = []
+    @State private var discarding: DiscardRequest?
 
     var selected: FileChange? { changes.first(where: { $0.id == selectedFile }) }
 
     var commitPanel: some View {
-        CommitPanel(trama: trama, repo: repo, merging: merging, changes: changes, unchecked: $unchecked)
+        CommitPanel(trama: trama, repo: repo, merging: merging, changes: changes, unchecked: $unchecked, onDiscardAll: { discarding = .files(changes) })
+    }
+
+    var fileList: some View {
+        FileList(changes: changes, selectedFile: $selectedFile, unchecked: $unchecked, onDiscard: merging ? nil : { discarding = .files([$0]) })
+    }
+
+    var diffPane: some View {
+        DiffPane(change: selected, lines: diff, path: path, onDiscardFile: merging ? nil : { discarding = .files([$0]) }, onDiscardLines: merging ? nil : { c, ids in discarding = .lines(c, ids) })
+    }
+
+    func confirm(_ request: DiscardRequest) {
+        Task {
+            switch request {
+            case .files(let list):
+                if await model.discard(trama.slug, repo: repo, paths: list.map(\.path)) {
+                    unchecked.subtract(list.map(\.path))
+                }
+            case .lines(let change, let ids):
+                _ = await model.discardLines(trama.slug, repo: repo, change: change, lines: ids)
+            }
+        }
     }
 
     var body: some View {
@@ -38,19 +94,25 @@ struct ChangesPane: View {
             ViewThatFits(in: .horizontal) {
                 HStack(alignment: .top, spacing: 14) {
                     VStack(spacing: 14) {
-                        FileList(changes: changes, selectedFile: $selectedFile, unchecked: $unchecked)
+                        fileList
                         commitPanel
                         AgentCard(status: status)
                     }
                     .frame(width: 252)
-                    DiffPane(change: selected, lines: diff, path: path)
+                    diffPane
                 }
                 VStack(spacing: 14) {
-                    FileList(changes: changes, selectedFile: $selectedFile, unchecked: $unchecked)
+                    fileList
                     commitPanel
-                    DiffPane(change: selected, lines: diff, path: path)
+                    diffPane
                     AgentCard(status: status)
                 }
+            }
+            .confirmationDialog(discarding?.title ?? "", isPresented: Binding(get: { discarding != nil }, set: { if !$0 { discarding = nil } }), presenting: discarding) { request in
+                Button("Descartar", role: .destructive) { confirm(request) }
+                Button("Cancelar", role: .cancel) {}
+            } message: { request in
+                Text(request.message)
             }
         }
     }
@@ -95,11 +157,13 @@ struct FileList: View {
     @Binding var selectedFile: String?
     let unchecked: Binding<Set<String>>?
     let changes: [FileChange]
+    let onDiscard: ((FileChange) -> Void)?
 
-    init(changes: [FileChange], selectedFile: Binding<String?>, unchecked: Binding<Set<String>>? = nil) {
+    init(changes: [FileChange], selectedFile: Binding<String?>, unchecked: Binding<Set<String>>? = nil, onDiscard: ((FileChange) -> Void)? = nil) {
         self.changes = changes
         self._selectedFile = selectedFile
         self.unchecked = unchecked
+        self.onDiscard = onDiscard
     }
 
     var body: some View {
@@ -115,7 +179,7 @@ struct FileList: View {
                 .padding(.horizontal, 6)
                 VStack(spacing: 3) {
                     ForEach(changes) { c in
-                        FileRow(change: c, selected: c.id == selectedFile, checked: unchecked.map { !$0.wrappedValue.contains(c.id) }, toggle: {
+                        FileRow(change: c, selected: c.id == selectedFile, checked: unchecked.map { !$0.wrappedValue.contains(c.id) }, discard: onDiscard.map { f in { f(c) } }, toggle: {
                             guard let unchecked else { return }
                             if unchecked.wrappedValue.contains(c.id) { unchecked.wrappedValue.remove(c.id) } else { unchecked.wrappedValue.insert(c.id) }
                         }) {
@@ -135,6 +199,7 @@ struct FileRow: View {
     let change: FileChange
     let selected: Bool
     let checked: Bool?
+    let discard: (() -> Void)?
     let toggle: () -> Void
     let action: () -> Void
     @State private var hovering = false
@@ -168,6 +233,17 @@ struct FileRow: View {
                     }
                 }
                 Spacer(minLength: 4)
+                if hovering, let discard {
+                    Button(action: discard) {
+                        Image(systemName: "arrow.uturn.backward")
+                            .font(.system(size: 11))
+                            .foregroundStyle(Theme.dangerText)
+                    }
+                    .buttonStyle(.plain)
+                    .help("Descartar mudanças deste arquivo")
+                    .accessibilityLabel("Descartar mudanças do arquivo")
+                    .transition(.opacity)
+                }
                 Delta(added: change.added, removed: change.removed)
             }
             .padding(.horizontal, 9)
@@ -178,6 +254,11 @@ struct FileRow: View {
         }
         .buttonStyle(.plain)
         .onHover { h in withAnimation(.easeOut(duration: 0.12)) { hovering = h } }
+        .contextMenu {
+            if let discard {
+                Button("Descartar mudanças…", role: .destructive, action: discard)
+            }
+        }
     }
 }
 
@@ -186,6 +267,24 @@ struct DiffPane: View {
     let change: FileChange?
     let lines: [DiffLine]
     let path: String
+    var onDiscardFile: ((FileChange) -> Void)?
+    var onDiscardLines: ((FileChange, Set<Int>) -> Void)?
+    @State private var picked: Set<Int> = []
+
+    var canPickLines: Bool { onDiscardLines != nil && change?.untracked == false }
+
+    func hunkLines(startingAt index: Int) -> Set<Int> {
+        var ids: Set<Int> = []
+        for l in lines[(index + 1)...] {
+            if l.kind == .hunk { break }
+            if l.kind == .added || l.kind == .removed { ids.insert(l.id) }
+        }
+        return ids
+    }
+
+    func toggle(_ id: Int) {
+        if picked.contains(id) { picked.remove(id) } else { picked.insert(id) }
+    }
 
     var contentWidth: CGFloat {
         let longest = lines.map { $0.text.count }.max() ?? 0
@@ -230,6 +329,17 @@ struct DiffPane: View {
                         .buttonStyle(IconButton(size: 26))
                         .help("Abrir no editor")
                         .accessibilityLabel("Abrir no editor")
+                        if let onDiscardFile {
+                            Button {
+                                onDiscardFile(c)
+                            } label: {
+                                Image(systemName: "arrow.uturn.backward")
+                                    .foregroundStyle(Theme.dangerText)
+                            }
+                            .buttonStyle(IconButton(size: 26))
+                            .help("Descartar todas as mudanças deste arquivo")
+                            .accessibilityLabel("Descartar mudanças do arquivo")
+                        }
                     }
                 }
                 .padding(.horizontal, 14)
@@ -244,8 +354,15 @@ struct DiffPane: View {
                     GeometryReader { geo in
                         ScrollView([.vertical, .horizontal]) {
                             LazyVStack(alignment: .leading, spacing: 0) {
-                                ForEach(lines) { l in
-                                    DiffRow(line: l)
+                                ForEach(Array(lines.enumerated()), id: \.element.id) { index, l in
+                                    DiffRow(
+                                        line: l,
+                                        picked: picked.contains(l.id),
+                                        onPick: canPickLines && (l.kind == .added || l.kind == .removed) ? { toggle(l.id) } : nil,
+                                        onDiscardHunk: canPickLines && l.kind == .hunk ? {
+                                            if let c = change { onDiscardLines?(c, hunkLines(startingAt: index)) }
+                                        } : nil
+                                    )
                                 }
                             }
                             .frame(minWidth: max(geo.size.width, contentWidth), alignment: .topLeading)
@@ -256,20 +373,48 @@ struct DiffPane: View {
                     .frame(height: min(420, CGFloat(lines.count) * 20 + 12))
                     .id(change?.id)
                     .transition(.opacity)
+                    if !picked.isEmpty, let c = change {
+                        HStack(spacing: 10) {
+                            Text("\(picked.count) \(plural(picked.count, "linha escolhida", "linhas escolhidas"))")
+                                .font(.system(size: 12))
+                                .foregroundStyle(Theme.text3)
+                            Spacer()
+                            Button("Limpar") { picked = [] }
+                                .buttonStyle(.plain)
+                                .font(.system(size: 11.5))
+                                .foregroundStyle(Theme.faded)
+                            Button {
+                                onDiscardLines?(c, picked)
+                            } label: {
+                                Label("Descartar linhas", systemImage: "arrow.uturn.backward")
+                            }
+                            .buttonStyle(GhostButton(compact: true))
+                        }
+                        .padding(.horizontal, 14)
+                        .frame(height: 42)
+                        .overlay(alignment: .top) { Rectangle().fill(Theme.line).frame(height: 1) }
+                        .transition(.opacity)
+                    }
                 }
             }
         }
         .frame(maxWidth: .infinity)
+        .animation(.easeOut(duration: 0.15), value: picked.isEmpty)
+        .onChange(of: change?.id) { _, _ in picked = [] }
+        .onChange(of: lines) { _, _ in picked = [] }
     }
 }
 
 struct DiffRow: View {
     let line: DiffLine
+    var picked = false
+    var onPick: (() -> Void)?
+    var onDiscardHunk: (() -> Void)?
 
     var background: Color {
         switch line.kind {
-        case .added: return Theme.ok.opacity(0.11)
-        case .removed: return Theme.danger.opacity(0.11)
+        case .added: return Theme.ok.opacity(picked ? 0.28 : 0.11)
+        case .removed: return Theme.danger.opacity(picked ? 0.28 : 0.11)
         case .hunk: return Theme.iris.opacity(0.06)
         case .context: return .clear
         }
@@ -295,6 +440,16 @@ struct DiffRow: View {
                     .foregroundStyle(Theme.irisText)
                     .padding(.leading, 12)
                     .lineLimit(1)
+                if let onDiscardHunk {
+                    Button(action: onDiscardHunk) {
+                        Label("Descartar bloco", systemImage: "arrow.uturn.backward")
+                            .font(.system(size: 11))
+                            .foregroundStyle(Theme.dangerText)
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.leading, 14)
+                    .help("Descartar todas as linhas alteradas deste bloco")
+                }
             } else {
                 Text(line.oldNumber.map(String.init) ?? "")
                     .frame(width: 34, alignment: .trailing)
@@ -316,6 +471,12 @@ struct DiffRow: View {
         .font(Theme.mono(12))
         .frame(height: 20)
         .background(background)
+        .overlay(alignment: .leading) {
+            if picked { Rectangle().fill(Theme.ember).frame(width: 2) }
+        }
+        .contentShape(Rectangle())
+        .onTapGesture { onPick?() }
+        .help(onPick == nil ? "" : "Clique para escolher esta linha")
     }
 }
 
@@ -420,6 +581,7 @@ struct CommitPanel: View {
     let merging: Bool
     let changes: [FileChange]
     @Binding var unchecked: Set<String>
+    let onDiscardAll: () -> Void
     @State private var message = ""
 
     var chosen: [String] { changes.map(\.id).filter { !unchecked.contains($0) } }
@@ -450,6 +612,14 @@ struct CommitPanel: View {
                     .buttonStyle(.plain)
                     .font(.system(size: 11.5))
                     .foregroundStyle(Theme.faded)
+                    if !merging {
+                        Button("Descartar tudo", action: onDiscardAll)
+                            .buttonStyle(.plain)
+                            .font(.system(size: 11.5))
+                            .foregroundStyle(Theme.dangerText)
+                            .disabled(model.busy)
+                            .padding(.leading, 6)
+                    }
                     Spacer()
                     Button {
                         let paths = chosen

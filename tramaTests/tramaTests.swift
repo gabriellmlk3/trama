@@ -452,6 +452,22 @@ final class FlowTests: XCTestCase {
         XCTAssertEqual(c.decisions.count, 1)
     }
 
+    func testRemoveDeletesTramaAndOptionallyBranches() throws {
+        let w = try lab.workspace(withContext: true)
+        let (keep, _) = try w.newTrama(NewTramaOptions(title: "Fica", repos: ["api"], noFetch: true))
+        let (gone, _) = try w.newTrama(NewTramaOptions(title: "Some", repos: ["api"], noFetch: true))
+        let api = lab.repos["rebocs_api"]!
+        let removed = try w.remove(gone.slug)
+        XCTAssertEqual(removed.slug, gone.slug)
+        XCTAssertEqual(try w.tramas().map(\.slug), [keep.slug])
+        XCTAssertFalse(Paths.exists(w.tramaPath(gone.slug)))
+        XCTAssertTrue(Git.branchExists(api, gone.branch), "por padrão a branch fica")
+
+        let (again, _) = try w.newTrama(NewTramaOptions(title: "Some de novo", repos: ["api"], noFetch: true))
+        _ = try w.remove(again.slug, deleteBranches: true)
+        XCTAssertFalse(Git.branchExists(api, again.branch))
+    }
+
     func testRecipeSuggestionOnRegistration() throws {
         let dir = try lab.newRepo("suggest-web")
         try lab.write(dir + "/.env", "A=1\n")
@@ -1425,6 +1441,37 @@ final class GitOverviewTests: XCTestCase {
 
         try w.commitChanges(t.slug, repo: "api", paths: ["src/app.txt"], message: "o resto")
         XCTAssertTrue(try w.gitOverview(t.slug, repo: "api").changes.isEmpty)
+    }
+
+    func testDiscardFilesAndLines() throws {
+        let lab = try Lab()
+        defer { lab.cleanup() }
+        let w = try lab.workspace()
+        let (t, _) = try w.newTrama(NewTramaOptions(title: "Descartar", repos: ["api"], noFetch: true))
+        let wt = w.worktreePath(t.slug, "rebocs_api")
+        try lab.commit(wt, "src/lista.txt", "a\nb\nc\nd\ne\nf\ng\nh\ni\nj\n", "lista")
+
+        try lab.write(wt + "/src/lista.txt", "A\nb\nc\nd\ne\nf\ng\nh\ni\nJ\nextra\n")
+        let change = try XCTUnwrap(try w.gitOverview(t.slug, repo: "api").changes.first)
+        let diff = try w.fileDiff(t.slug, repo: "api", change: change)
+        let first = try XCTUnwrap(diff.first(where: { $0.kind == .removed && $0.text == "a" }))
+        let firstAdded = try XCTUnwrap(diff.first(where: { $0.kind == .added && $0.text == "A" }))
+        try w.discardLines(t.slug, repo: "api", change: change, lines: [first.id, firstAdded.id])
+        XCTAssertEqual(try File.read(wt + "/src/lista.txt"), "a\nb\nc\nd\ne\nf\ng\nh\ni\nJ\nextra\n")
+
+        let rest = try XCTUnwrap(try w.gitOverview(t.slug, repo: "api").changes.first)
+        let restDiff = try w.fileDiff(t.slug, repo: "api", change: rest)
+        let extra = try XCTUnwrap(restDiff.first(where: { $0.text == "extra" }))
+        try w.discardLines(t.slug, repo: "api", change: rest, lines: [extra.id])
+        XCTAssertEqual(try File.read(wt + "/src/lista.txt"), "a\nb\nc\nd\ne\nf\ng\nh\ni\nJ\n")
+        XCTAssertThrowsError(try w.discardLines(t.slug, repo: "api", change: rest, lines: [9999]))
+
+        try lab.write(wt + "/solto.txt", "novo\n")
+        try w.discardChanges(t.slug, repo: "api", paths: ["solto.txt", "src/lista.txt"])
+        XCTAssertFalse(FileManager.default.fileExists(atPath: wt + "/solto.txt"))
+        XCTAssertEqual(try File.read(wt + "/src/lista.txt"), "a\nb\nc\nd\ne\nf\ng\nh\ni\nj\n")
+        XCTAssertTrue(try w.gitOverview(t.slug, repo: "api").changes.isEmpty)
+        XCTAssertThrowsError(try w.discardChanges(t.slug, repo: "api", paths: ["nao-existe.txt"]))
     }
 
     func testOverviewOfWorktree() throws {

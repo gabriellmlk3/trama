@@ -19,6 +19,7 @@ extension CLI {
         "estacionar": Command(summary: "pausa uma trama (os worktrees ficam intactos)", usage: "trama estacionar [trama]", valueFlags: [], run: cmdPark),
         "retomar": Command(summary: "reativa uma trama, com rebase opcional na base", usage: "trama retomar <trama> [--rebase] [--sem-fetch]", valueFlags: [], run: cmdResume),
         "arquivar": Command(summary: "remove os worktrees e arquiva a trama (branches ficam)", usage: "trama arquivar <trama> [--forcar]", valueFlags: [], run: cmdArchive),
+        "remover": Command(summary: "remove a trama de vez: worktrees e registro (a cápsula e, por padrão, as branches ficam)", usage: "trama remover <trama> [--forcar] [--branches]", valueFlags: [], run: cmdRemove),
         "subir": Command(summary: "sobe os serviços de desenvolvimento da trama, cada um na sua porta",
                          usage: "trama subir [--trama x] [--repo nome] [--servico nome]", valueFlags: ["trama", "repo", "servico"], run: cmdUp),
         "descer": Command(summary: "derruba os serviços da trama", usage: "trama descer [--trama x] [--repo nome] [--servico nome]", valueFlags: ["trama", "repo", "servico"], run: cmdDown),
@@ -321,6 +322,14 @@ extension CLI {
         guard let slug = a.positional(0) else { throw TramaError("uso: trama arquivar <trama> [--forcar]") }
         let t = try w.archive(slug, force: a.has("forcar"))
         c.ok("\(t.title) arquivada · worktrees removidos, branch \(t.branch) mantida em cada repositório")
+    }
+
+    static func cmdRemove(_ c: Context, _ a: Arguments) throws {
+        let w = try c.open()
+        guard let slug = a.positional(0) else { throw TramaError("uso: trama remover <trama> [--forcar] [--branches]") }
+        let branches = a.has("branches")
+        let t = try w.remove(slug, force: a.has("forcar"), deleteBranches: branches)
+        c.ok("\(t.title) removida · " + (branches ? "branches \(t.branch) apagadas" : "branch \(t.branch) mantida em cada repositório"))
     }
 
     private static func serviceScope(_ c: Context, _ w: Workspace, _ a: Arguments) throws -> (slug: String, repo: String?) {

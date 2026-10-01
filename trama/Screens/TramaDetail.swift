@@ -57,6 +57,7 @@ struct TramaHeader: View {
     @EnvironmentObject var model: AppModel
     let trama: LiveTrama
     @State private var confirmingArchive = false
+    @State private var confirmingRemoval = false
     @State private var choosingPullRequests = false
     @State private var mergeSource: LiveTrama?
 
@@ -125,9 +126,11 @@ struct TramaHeader: View {
                         .disabled(model.visibleTramas.count < 2)
                     }
                     Button("Arquivar trama…") { confirmingArchive = true }
+                    Button("Remover trama…", role: .destructive) { confirmingRemoval = true }
                 } label: {
                     Image(systemName: "ellipsis")
-                        .frame(width: 30, height: 30)
+                        .frame(width: 34, height: 32)
+                        .contentShape(Rectangle())
                 }
                 .menuStyle(.button)
                 .buttonStyle(.plain)
@@ -193,6 +196,13 @@ struct TramaHeader: View {
         }
         .sheet(isPresented: $choosingPullRequests) {
             PullRequestSheet(trama: trama)
+        }
+        .confirmationDialog("Remover “\(trama.title)”?", isPresented: $confirmingRemoval) {
+            Button("Remover e manter as branches", role: .destructive) { Task { await model.remove(trama.slug, deleteBranches: false) } }
+            Button("Remover e apagar as branches locais", role: .destructive) { Task { await model.remove(trama.slug, deleteBranches: true) } }
+            Button("Cancelar", role: .cancel) {}
+        } message: {
+            Text("A trama some do Trama e os worktrees são removidos. A cápsula continua no repositório de contexto. Se houver mudanças não commitadas, a remoção é recusada. Apagar as branches \(trama.branch) descarta commits que não estejam em outra branch.")
         }
         .alert("Arquivar “\(trama.title)”?", isPresented: $confirmingArchive) {
             Button("Arquivar", role: .destructive) { Task { await model.archive(trama.slug) } }
@@ -534,11 +544,13 @@ struct InsideDetail: View {
                     Button("Soltar da trama") { Task { await model.drop(trama.slug, repo.name) } }
                 } label: {
                     Image(systemName: "ellipsis")
+                        .frame(width: 30, height: 30)
+                        .contentShape(Rectangle())
                 }
                 .menuStyle(.button)
                 .buttonStyle(.plain)
                 .menuIndicator(.hidden)
-                .frame(width: 22)
+                .fixedSize()
                 .help("Mais ações")
             }
         }

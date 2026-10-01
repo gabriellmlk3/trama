@@ -308,6 +308,12 @@ final class AppModel: ObservableObject {
         }
     }
 
+    func remove(_ slug: String, deleteBranches: Bool) async {
+        if await perform(success: "Trama removida", { _ = try $0.remove(slug, deleteBranches: deleteBranches) }) {
+            screen = active.first.map { Screen.trama($0.slug) }
+        }
+    }
+
     func annotate(_ kind: NoteKind, _ text: String, trama slug: String) async {
         await perform { w in
             switch kind {
@@ -351,6 +357,14 @@ final class AppModel: ObservableObject {
 
     func commit(_ slug: String, repo: String, paths: [String], message: String) async -> Bool {
         await perform(success: "Commit feito em \(repo)") { _ = try $0.commitChanges(slug, repo: repo, paths: paths, message: message) }
+    }
+
+    func discard(_ slug: String, repo: String, paths: [String]) async -> Bool {
+        await perform(success: "\(paths.count) \(plural(paths.count, "arquivo descartado", "arquivos descartados")) em \(repo)") { try $0.discardChanges(slug, repo: repo, paths: paths) }
+    }
+
+    func discardLines(_ slug: String, repo: String, change: FileChange, lines: Set<Int>) async -> Bool {
+        await perform(success: "\(lines.count) \(plural(lines.count, "linha descartada", "linhas descartadas")) em \(change.name)") { try $0.discardLines(slug, repo: repo, change: change, lines: lines) }
     }
 
     func resolve(_ finding: Finding) async {
