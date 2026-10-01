@@ -92,6 +92,13 @@ struct GitRepoDetail: View {
                 }
                 .buttonStyle(GhostButton(compact: true))
                 Button {
+                    Task { await model.openInEditor(trama.slug, repos: [repo.name]) }
+                } label: {
+                    Label("Editor", systemImage: "chevron.left.forwardslash.chevron.right")
+                }
+                .buttonStyle(GhostButton(compact: true))
+                .help("Abre este worktree no editor do repositório")
+                Button {
                     Terminal.reveal(path)
                 } label: {
                     Label("Finder", systemImage: "folder")

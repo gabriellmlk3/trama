@@ -645,6 +645,25 @@ final class FlowTests: XCTestCase {
         XCTAssertThrowsError(try w.mergeWorktrees(repo: "api", from: wt, into: lab.root))
     }
 
+    func testEditorIsResolvedInsideTheWorktree() throws {
+        let w = try lab.workspace()
+        let (t, _) = try w.newTrama(NewTramaOptions(title: "Editor", repos: ["api"], noFetch: true))
+        let wt = w.worktreePath(t.slug, "rebocs_api")
+        try FileManager.default.createDirectory(atPath: wt + "/App.xcodeproj", withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(atPath: wt + "/Pods/Pods.xcodeproj", withIntermediateDirectories: true)
+        let launch = try w.editorLaunch(t.slug, repo: "api")
+        XCTAssertEqual(launch.app, "Xcode")
+        XCTAssertEqual(launch.path, wt + "/App.xcodeproj", "abre o projeto do worktree, não o da cópia principal")
+        try FileManager.default.createDirectory(atPath: wt + "/App.xcworkspace", withIntermediateDirectories: true)
+        XCTAssertEqual(try w.editorLaunch(t.slug, repo: "api").path, wt + "/App.xcworkspace")
+        try w.setEditor("api", "Cursor")
+        let custom = try w.editorLaunch(t.slug, repo: "api")
+        XCTAssertEqual(custom.app, "Cursor")
+        XCTAssertEqual(custom.path, wt)
+        try w.setEditor("api", nil)
+        XCTAssertNil(try w.repo("api").editor)
+    }
+
     func testFailureMidwayUndoesEverything() throws {
         let w = try lab.workspace()
         try FileManager.default.createDirectory(atPath: w.worktreePath("quebrada", "rebocs-admin"), withIntermediateDirectories: true)

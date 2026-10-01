@@ -22,3 +22,4 @@ Fazer com que seja possível selecionar se vai abrir o claude desktop ou cli emb
 
 - 2026-09-30 19:32 · trama criada com trama
 - 2026-09-30 22:03 · repositório de contexto: ~/Documents/GitHub/trama
+- 2026-09-30 22:39 · merge de main em trama

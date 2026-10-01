@@ -205,6 +205,7 @@ private struct RecipeEditor: View {
     @State private var run = ""
     @State private var services = ""
     @State private var mergeRank = "0"
+    @State private var editor = ""
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -244,6 +245,15 @@ private struct RecipeEditor: View {
                     .foregroundStyle(.secondary)
             }
             HStack(spacing: 8) {
+                Text("Editor")
+                    .font(.subheadline)
+                TextField("automático", text: $editor)
+                    .frame(width: 160)
+                Text("nome do app, ex.: Xcode, Cursor")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            HStack(spacing: 8) {
                 Text("Ordem de merge dos PRs")
                     .font(.subheadline)
                 TextField("0", text: $mergeRank)
@@ -262,7 +272,9 @@ private struct RecipeEditor: View {
                     let r = lines(run)
                     let parsed = parseServices(services)
                     let rank = Int(mergeRank.trimmingCharacters(in: .whitespaces)) ?? 0
+                    let app = editor
                     Task {
+                        await model.setEditor(repo.name, app)
                         await model.setMergeRank(repo.name, rank)
                         await model.setRecipe(repo.name, copy: c, run: r)
                         await model.setServices(repo.name, parsed)
@@ -278,6 +290,7 @@ private struct RecipeEditor: View {
             copy = repo.copy.joined(separator: "\n")
             run = repo.run.joined(separator: "\n")
             mergeRank = String(repo.mergeRank)
+            editor = repo.editor ?? ""
             services = repo.services.map { "\($0.name) \($0.port) \($0.command)" }.joined(separator: "\n")
         }
     }

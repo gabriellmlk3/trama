@@ -104,6 +104,7 @@ struct TramaHeader: View {
                 Menu {
                     Button("Mostrar pasta no Finder") { Terminal.reveal(trama.path) }
                     Button("Copiar nome da branch") { Terminal.copy(trama.branch) }
+                    Button("Abrir todos no editor") { Task { await model.openInEditor(trama.slug, repos: trama.repos) } }
                     if trama.context != nil || model.state?.context != nil {
                         Button("Commitar cápsula no contexto") { Task { await model.sync(trama.slug) } }
                     }
@@ -515,6 +516,14 @@ struct InsideDetail: View {
                 .buttonStyle(IconButton())
                 .help("Abrir o Terminal em \(repo.name)")
                 .accessibilityLabel("Abrir o Terminal em \(repo.name)")
+                Button {
+                    Task { await model.openInEditor(trama.slug, repos: [repo.name]) }
+                } label: {
+                    Image(systemName: "chevron.left.forwardslash.chevron.right")
+                }
+                .buttonStyle(IconButton())
+                .help("Abrir o worktree de \(repo.name) no editor")
+                .accessibilityLabel("Abrir \(repo.name) no editor")
                 Button {
                     model.terminals.open(path: path, command: "claude", title: "\(repo.name) · claude")
                 } label: {
