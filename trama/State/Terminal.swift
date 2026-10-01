@@ -11,6 +11,20 @@ enum Terminal {
         NSWorkspace.shared.open(URL(fileURLWithPath: path))
     }
 
+    static func open(_ path: String, withApp app: String) throws {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/open")
+        process.arguments = ["-a", app, path]
+        let error = Pipe()
+        process.standardError = error
+        try process.run()
+        process.waitUntilExit()
+        if process.terminationStatus != 0 {
+            let text = String(decoding: error.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
+            throw TramaError(text.isEmpty ? "não consegui abrir \(app)" : text)
+        }
+    }
+
     static func copy(_ text: String) {
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(text, forType: .string)

@@ -449,6 +449,21 @@ final class AppModel: ObservableObject {
         }
     }
 
+    func setEditor(_ name: String, _ editor: String) async {
+        await perform { _ = try $0.setEditor(name, editor) }
+    }
+
+    func openInEditor(_ slug: String, repos: [String]) async {
+        for name in repos {
+            do {
+                let launch = try await Core.run { try $0.editorLaunch(slug, repo: name) }
+                try Terminal.open(launch.path, withApp: launch.app)
+            } catch {
+                showError("\(name): \(errorMessage(error))")
+            }
+        }
+    }
+
     func setServices(_ name: String, _ services: [ServiceConfig]) async {
         await perform(success: "Serviços de \(name) salvos") { _ = try $0.setServices(name, services) }
     }

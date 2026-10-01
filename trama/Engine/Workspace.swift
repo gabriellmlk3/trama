@@ -15,10 +15,11 @@ public struct RepoConfig: Codable, Hashable, Identifiable, Sendable {
     public var run: [String] = []
     public var services: [ServiceConfig] = []
     public var mergeRank = 0
+    public var editor: String?
 
     enum CodingKeys: String, CodingKey {
         case name = "nome", alias = "apelido", path = "caminho", label = "rotulo", base, copy = "copiar", run = "rodar"
-        case services = "servicos", mergeRank = "ordemMerge"
+        case services = "servicos", mergeRank = "ordemMerge", editor
     }
 
     public var id: String { name }
@@ -41,6 +42,7 @@ extension RepoConfig {
         run = try c.decodeIfPresent([String].self, forKey: .run) ?? []
         services = try c.decodeIfPresent([ServiceConfig].self, forKey: .services) ?? []
         mergeRank = try c.decodeIfPresent(Int.self, forKey: .mergeRank) ?? 0
+        editor = try c.decodeIfPresent(String.self, forKey: .editor)
     }
 }
 
