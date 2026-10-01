@@ -297,3 +297,23 @@ extension CollapsibleSection where Trailing == EmptyView {
         self.init(title: title, collapseLabel: collapseLabel, storageKey: storageKey, trailing: { EmptyView() }, content: content)
     }
 }
+
+/// ScrollView com esmaecimento desfocado no topo (efeito de borda nativo do macOS 26).
+/// O blur é aplicado pelo sistema sobre o conteúdo que rola por baixo da barra do topo.
+struct BlurScrollView<Content: View>: View {
+    var height: CGFloat = 36
+    @ViewBuilder var content: () -> Content
+
+    var body: some View {
+        ScrollView {
+            content()
+        }
+        .scrollEdgeEffectHidden(false, for: .top)
+        .scrollEdgeEffectStyle(.soft, for: .top)
+        .safeAreaBar(edge: .top, spacing: 0) {
+            Rectangle()
+                .fill(Theme.background.opacity(0.01))
+                .frame(height: height)
+        }
+    }
+}

@@ -35,6 +35,9 @@ final class PullRequestPlanner: ObservableObject {
     @Published private(set) var refreshFailures: [String] = []
     @Published private(set) var failure: String?
     @Published var draft = false
+    @Published var mode = Mode.pullRequest
+
+    enum Mode: Hashable { case pullRequest, merge }
 
     private var existing: [String: ExistingPullRequest] = [:]
     private var generation = 0
@@ -201,8 +204,16 @@ final class PullRequestPlanner: ObservableObject {
         options.first(where: { $0.name == branch })?.repos.count ?? 0
     }
 
+    func canMerge(_ row: PullRequestPlanRow) -> Bool {
+        switch row.blocker {
+        case nil, .merged, .closed: return row.ahead > 0 && !row.hasConflict
+        default: return false
+        }
+    }
+
     func isIncluded(_ row: PullRequestPlanRow) -> Bool {
-        row.action != .blocked && !excluded.contains(row.repo)
+        let usable = mode == .merge ? canMerge(row) : row.action != .blocked
+        return usable && !excluded.contains(row.repo)
     }
 
     var selection: [PullRequestPlanRow] { rows.filter { isIncluded($0) } }
@@ -218,6 +229,10 @@ final class PullRequestPlanner: ObservableObject {
     }
 
     var buttonTitle: String {
+        if mode == .merge {
+            let n = selection.count
+            return n == 0 ? "Nada a mesclar" : "Mesclar \(n) \(plural(n, "repositório", "repositórios")) direto"
+        }
         var parts: [String] = []
         if creating > 0 { parts.append("abrir \(creating) \(plural(creating, "PR", "PRs"))") }
         if retargeting > 0 { parts.append("redirecionar \(retargeting)") }
@@ -236,6 +251,7 @@ struct PullRequestSheet: View {
     @StateObject private var planner = PullRequestPlanner()
     @State private var pickingForAll = false
     @State private var sending = false
+    @State private var confirmingMerge = false
     let trama: LiveTrama
 
     var body: some View {
@@ -263,10 +279,19 @@ struct PullRequestSheet: View {
                 }
                 .font(Theme.mono(12))
                 .foregroundStyle(Theme.faded)
-                Text("Abrir PRs")
+                Text(planner.mode == .merge ? "Mesclar direto" : "Abrir PRs")
                     .font(Theme.serif(32))
             }
             Spacer()
+            Picker("Modo", selection: $planner.mode) {
+                Text("Abrir PRs").tag(PullRequestPlanner.Mode.pullRequest)
+                Text("Mesclar direto").tag(PullRequestPlanner.Mode.merge)
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .frame(width: 230)
+            .padding(.bottom, 4)
+            if planner.mode == .pullRequest {
             HStack(spacing: 10) {
                 Text("Abrir como rascunho")
                     .font(.system(size: 12.5))
@@ -277,6 +302,7 @@ struct PullRequestSheet: View {
                     .controlSize(.small)
             }
             .padding(.bottom, 4)
+            }
         }
         .padding(.horizontal, 28)
         .padding(.top, 26)
@@ -374,7 +400,7 @@ struct PullRequestSheet: View {
             HStack(spacing: Column.gap) {
                 Color.clear.frame(width: Column.check, height: 1)
                 SectionLabel(text: "Repositório").frame(width: Column.repo, alignment: .leading)
-                SectionLabel(text: "Destino do PR").frame(width: Column.target, alignment: .leading)
+                SectionLabel(text: planner.mode == .merge ? "Mesclar em" : "Destino do PR").frame(width: Column.target, alignment: .leading)
                 SectionLabel(text: "Commits").frame(width: Column.commits, alignment: .leading)
                 SectionLabel(text: "Conflito previsto").frame(width: Column.conflict, alignment: .leading)
                 SectionLabel(text: "Situação").frame(maxWidth: .infinity, alignment: .leading)
@@ -397,7 +423,9 @@ struct PullRequestSheet: View {
                 .font(.system(size: 13))
                 .foregroundStyle(Theme.iris)
                 .padding(.top, 1)
-            Text("Os PRs recebem links cruzados na ordem de merge" + orderText + ". Commits e conflitos são calculados contra o destino de cada linha." + manualText)
+            Text(planner.mode == .merge
+                ? "A branch da trama é mesclada direto no destino e enviada ao remoto" + orderText + ", sem PR e sem revisão. Repositórios com conflito previsto ficam de fora: traga o destino para a trama e resolva antes."
+                : "Os PRs recebem links cruzados na ordem de merge" + orderText + ". Commits e conflitos são calculados contra o destino de cada linha." + manualText)
                 .font(.system(size: 12))
                 .foregroundStyle(Theme.faded)
                 .fixedSize(horizontal: false, vertical: true)
@@ -421,7 +449,7 @@ struct PullRequestSheet: View {
             Button("Cancelar") { dismiss() }
                 .buttonStyle(GhostButton())
                 .keyboardShortcut(.cancelAction)
-            Button(action: submit) {
+            Button(action: { planner.mode == .merge ? (confirmingMerge = true) : submit() }) {
                 HStack(spacing: 10) {
                     if sending {
                         ProgressView().controlSize(.small)
@@ -434,6 +462,12 @@ struct PullRequestSheet: View {
             .keyboardShortcut(.return, modifiers: .command)
             .disabled(!planner.canSubmit || sending)
             .opacity(planner.canSubmit && !sending ? 1 : 0.5)
+        }
+        .confirmationDialog("Mesclar direto, sem PR?", isPresented: $confirmingMerge) {
+            Button("Mesclar e enviar ao remoto", role: .destructive, action: submit)
+            Button("Cancelar", role: .cancel) {}
+        } message: {
+            Text(planner.selection.map { "\($0.repo) → \($0.target)" }.joined(separator: "\n"))
         }
         .padding(.horizontal, 28)
         .padding(.vertical, 14)
@@ -448,6 +482,8 @@ struct PullRequestSheet: View {
             let pushes = planner.selection.count
             if pushes == 0 {
                 Text("Nada para enviar")
+            } else if planner.mode == .merge {
+                SummaryStat(value: pushes, text: pushes == 1 ? "branch recebe a mescla" : "branches recebem a mescla", color: Theme.emberLight)
             } else {
                 SummaryStat(value: pushes, text: pushes == 1 ? "branch vai para o remoto" : "branches vão para o remoto", color: Theme.text)
                 if planner.creating > 0 {
@@ -474,7 +510,14 @@ struct PullRequestSheet: View {
         let targets = planner.runTargets
         let only = planner.runOnly
         let draft = planner.draft
+        let merging = planner.mode == .merge
         Task {
+            if merging {
+                let ok = await model.mergeIntoBranches(trama.slug, targets: targets, only: only)
+                sending = false
+                if ok { dismiss() }
+                return
+            }
             let ok = await model.openPullRequests(trama.slug, draft: draft, targets: targets, only: only)
             sending = false
             if ok { dismiss() }
@@ -567,7 +610,7 @@ private struct PullRequestRowView: View {
     @State private var picking = false
 
     var included: Bool { planner.isIncluded(row) }
-    var blocked: Bool { row.action == .blocked }
+    var blocked: Bool { planner.mode == .merge ? !planner.canMerge(row) : row.action == .blocked }
     var canPick: Bool { row.blocker != .noWorktree && row.blocker != .noRemote }
 
     var missingTarget: String? {
@@ -696,6 +739,18 @@ private struct PullRequestRowView: View {
     var status: some View {
         let number = row.existing?.number ?? 0
         VStack(alignment: .leading, spacing: 5) {
+            if planner.mode == .merge {
+                if planner.canMerge(row) {
+                    TonePill(text: "mesclar direto", icon: "arrow.triangle.merge", color: Theme.emberLight, fill: Theme.ember.opacity(0.10), stroke: Theme.ember.opacity(0.32))
+                    note("push em \(row.target)", mono: true)
+                } else if row.hasConflict {
+                    TonePill(text: "conflito previsto", icon: "exclamationmark.circle", color: Theme.waitText)
+                    note("resolva antes de mesclar")
+                } else {
+                    TonePill(text: row.ahead == 0 && row.blocker == nil ? "nada a mesclar" : blockedTitle)
+                    note(row.ahead == 0 && row.blocker == nil ? "0 commits novos" : blockedNote)
+                }
+            } else {
             switch row.action {
             case .create:
                 TonePill(text: "novo PR", icon: "plus", color: Theme.emberLight, fill: Theme.ember.opacity(0.10), stroke: Theme.ember.opacity(0.32))
@@ -712,6 +767,7 @@ private struct PullRequestRowView: View {
             case .blocked:
                 TonePill(text: blockedTitle)
                 note(blockedNote)
+            }
             }
         }
     }

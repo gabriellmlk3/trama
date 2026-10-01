@@ -10,6 +10,7 @@ struct PreferencesView: View {
     @AppStorage(ClaudeTarget.storageKey) private var claudeTarget = ClaudeTarget.cli.rawValue
     @AppStorage(AgentScope.storageKey) private var agentScope = AgentScope.single.rawValue
     @State private var editingRecipe: RepoConfig?
+    @State private var toolVersions: [String: String?] = [:]
     @State private var credentials = GitCredentials.all()
     @State private var credentialKind = ProviderKind.github
     @State private var credentialHost = ProviderKind.github.defaultHost
@@ -65,6 +66,43 @@ struct PreferencesView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+
+            Section {
+                ForEach(ToolInstaller.all) { tool in
+                    LabeledContent("\(tool.title) (\(tool.id))") {
+                        HStack(spacing: 10) {
+                            if let loaded = toolVersions[tool.id] {
+                                OnIndicator(on: loaded != nil, text: loaded ?? "não instalado")
+                                if loaded == nil {
+                                    Button("Instalar") {
+                                        model.terminals.open(path: NSHomeDirectory(), command: tool.installCommand, title: "instalar \(tool.id)")
+                                    }
+                                    .help(tool.purpose)
+                                }
+                            } else {
+                                ProgressView().controlSize(.small)
+                            }
+                        }
+                    }
+                }
+                HStack(spacing: 10) {
+                    Button("Instalar as que faltam") {
+                        let missing = ToolInstaller.missing()
+                        guard !missing.isEmpty else { return }
+                        model.terminals.open(path: NSHomeDirectory(), command: missing.map(\.installCommand).joined(separator: " && "), title: "instalar ferramentas")
+                    }
+                    .disabled(toolVersions.values.allSatisfy { $0 != nil })
+                    Button("Atualizar") { refreshTools() }
+                }
+            } header: {
+                Text("Ferramentas")
+            } footer: {
+                Text("As CLIs dos provedores são instaladas pelo Homebrew (que também é instalado se faltar) no terminal do Trama. Depois, entre na conta em Contas Git. A lista se atualiza quando você volta ao app.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            .task { refreshTools() }
+            .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in refreshTools() }
 
             Section {
                 ForEach(credentials) { c in
@@ -245,6 +283,15 @@ struct PreferencesView: View {
             localError = errorMessage(error)
         }
         reload()
+    }
+
+    func refreshTools() {
+        Task.detached {
+            let result = ToolInstaller.all.map { ($0.id, $0.version) }
+            await MainActor.run {
+                toolVersions = Dictionary(uniqueKeysWithValues: result.map { ($0.0, $0.1) })
+            }
+        }
     }
 
     var canSaveCredential: Bool {

@@ -24,6 +24,8 @@ extension CLI {
         "descer": Command(summary: "derruba os serviços da trama", usage: "trama descer [--trama x] [--repo nome] [--servico nome]", valueFlags: ["trama", "repo", "servico"], run: cmdDown),
         "pr": Command(summary: "abre os PRs de todos os repositórios da trama, ligados entre si (GitHub com gh, Azure DevOps com az, GitLab com glab; outros pelo link)",
                       usage: "trama pr [--rascunho] [--base develop | --base api=staging,admin=develop] [--repo a,b] [--simular] [--trama x]\n  trama pr ls [--trama x]", valueFlags: ["trama", "base", "repo"], run: cmdPullRequests),
+        "mesclar": Command(summary: "mescla a branch da trama direto em branches do remoto (sem PR), na ordem de merge",
+                          usage: "trama mesclar --base develop | --base api=staging,admin=develop [--repo a,b] [--simular] [--trama x]", valueFlags: ["trama", "base", "repo"], run: cmdMergeIntoBranches),
         "merge": Command(summary: "traz os commits de uma trama para outra, nos repositórios que as duas têm",
                          usage: "trama merge <origem> [--para destino] [--repo a,b] [--permitir-conflito]", valueFlags: ["para", "repo"], run: cmdMerge),
         "preparar": Command(summary: "refaz o preparo dos worktrees (copia arquivos e roda a receita do repositório)", usage: "trama preparar <trama> [repo]", valueFlags: [], run: cmdPrepare),
@@ -48,6 +50,7 @@ extension CLI {
         "agentes": Command(summary: "lista as sessões do Claude Code nas tramas", usage: "trama agentes [--json]", valueFlags: [], run: cmdAgents),
         "hook": Command(summary: "recebe eventos do Claude Code (uso interno)", usage: "trama hook < evento.json", valueFlags: [], run: cmdHook),
         "hooks": Command(summary: "instala ou remove os hooks no Claude Code", usage: "trama hooks instalar|remover|status [--settings caminho]", valueFlags: ["settings"], run: cmdHooks),
+        "ferramentas": Command(summary: "mostra ou instala as CLIs dos provedores (gh, glab, az)", usage: "trama ferramentas [instalar [gh|glab|az|todas]] [--json]", valueFlags: [], run: cmdTools),
         "versao": Command(summary: "mostra a versão", usage: "trama versao", valueFlags: [], run: { c, _ in c.line("trama \(CLI.version)") }),
     ]
 
@@ -388,6 +391,37 @@ extension CLI {
         c.warnings(result.warnings)
     }
 
+    static func cmdMergeIntoBranches(_ c: Context, _ a: Arguments) throws {
+        let w = try c.open()
+        let trama = try c.targetTrama(w, a.value("trama")).trama
+        var targets: [String: String] = [:]
+        if let spec = a.value("base") {
+            targets = try w.parsePullRequestTargets(spec, for: trama)
+        }
+        var only: Set<String>?
+        if let list = a.value("repo") {
+            only = Set(try list.split(separator: ",").map { try w.repo(String($0)).name })
+        }
+        if a.has("simular") || a.has("dry-run") {
+            _ = try w.remoteBranchCatalog(trama.slug, fetch: true)
+            let plan = try w.pullRequestPlan(trama.slug, targets: targets)
+                .filter { only?.contains($0.repo) ?? true }
+            if c.json { return try c.emitJSON(plan) }
+            var rows = [["ORDEM", "REPO", "DESTINO", "COMMITS", "CONFLITO"]]
+            for p in plan {
+                let conflict = p.conflictFiles.map { $0.isEmpty ? "nenhum" : "\($0.count) \(plural($0.count, "arquivo", "arquivos"))" } ?? "—"
+                rows.append(["\(p.order)", p.repo, p.target, "↑\(p.ahead)", conflict])
+            }
+            return c.text(table(rows))
+        }
+        let result = try w.mergeIntoBranches(trama.slug, targets: targets, only: only)
+        if c.json { return try c.emitJSON(result.results) }
+        for r in result.results {
+            c.line("  \(r.repo): \(r.situation)" + (r.detail.map { " · " + $0 } ?? ""))
+        }
+        c.warnings(result.warnings)
+    }
+
     static func cmdMerge(_ c: Context, _ a: Arguments) throws {
         let w = try c.open()
         guard let source = a.positional(0) else { throw TramaError("uso: trama merge <origem> [--para destino] [--repo a,b] [--permitir-conflito]") }
@@ -625,6 +659,44 @@ extension CLI {
               let out = try? w.handleHook(input),
               !out.isEmpty else { return }
         c.line(out)
+    }
+
+    static func cmdTools(_ c: Context, _ a: Arguments) throws {
+        switch a.positional(0) ?? "status" {
+        case "status":
+            let rows = ToolInstaller.all.map { (tool: $0, version: $0.version) }
+            if c.json {
+                return try c.emitJSON(Dictionary(uniqueKeysWithValues: rows.map { ($0.tool.id, $0.tool.isInstalled) }))
+            }
+            for row in rows {
+                c.line("\(row.tool.isInstalled ? "✓" : "✗") \(row.tool.id) · \(row.tool.title) · \(row.version ?? "não instalado")")
+            }
+            if !ToolInstaller.missing().isEmpty { c.line("  instale com: trama ferramentas instalar todas") }
+        case "instalar", "install":
+            let target = a.positional(1) ?? "todas"
+            let tools: [InstallableTool]
+            if ["todas", "todos", "all"].contains(target) {
+                tools = ToolInstaller.missing()
+            } else if let tool = ToolInstaller.named(target) {
+                tools = [tool]
+            } else {
+                throw TramaError("ferramenta desconhecida: \(target) (use gh, glab, az ou todas)")
+            }
+            guard !tools.isEmpty else { return c.ok("todas as ferramentas já estão instaladas") }
+            for tool in tools {
+                guard !tool.isInstalled else {
+                    c.line("✓ \(tool.id) já instalado")
+                    continue
+                }
+                c.line("instalando \(tool.id)…")
+                guard ToolInstaller.runInTerminal(tool.installCommand) == 0, tool.isInstalled else {
+                    throw TramaError("não consegui instalar o \(tool.id)")
+                }
+                c.ok("\(tool.id) instalado")
+            }
+        default:
+            throw TramaError("use: trama ferramentas [status|instalar [gh|glab|az|todas]]")
+        }
     }
 
     static func cmdHooks(_ c: Context, _ a: Arguments) throws {
