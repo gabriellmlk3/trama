@@ -199,6 +199,15 @@ extension Workspace {
         return (updated, pullRequestInfos(updated), warnings, manual, opened.map { $0.repo.name })
     }
 
+    @discardableResult
+    public func forgetPullRequests(_ slug: String, repos: [String]) throws -> Trama {
+        let updated = try updateTrama(slug) { t in
+            for name in repos { t.prs.removeValue(forKey: name) }
+        }
+        try? addJournal(updated.slug, "PRs descartados da trama: " + repos.joined(separator: ", "))
+        return updated
+    }
+
     public func pullRequestInfos(_ t: Trama) -> [PullRequestInfo] {
         let entries = mergeOrdered(t.repos).compactMap { r in t.prs[r.name].map { (r, $0) } }
         var out = [PullRequestInfo?](repeating: nil, count: entries.count)

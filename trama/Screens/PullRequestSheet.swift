@@ -37,7 +37,10 @@ final class PullRequestPlanner: ObservableObject {
     @Published var draft = false
     @Published var mode = Mode.pullRequest
 
-    enum Mode: Hashable { case pullRequest, merge }
+    enum Mode: Hashable, Identifiable {
+        case pullRequest, merge
+        var id: Self { self }
+    }
 
     private var existing: [String: ExistingPullRequest] = [:]
     private var generation = 0
@@ -172,6 +175,12 @@ final class PullRequestPlanner: ObservableObject {
         return nil
     }
 
+    func discard(_ repo: String) {
+        existing[repo] = nil
+        excluded.remove(repo)
+        replan()
+    }
+
     func toggle(_ repo: String) {
         if excluded.contains(repo) {
             excluded.remove(repo)
@@ -254,6 +263,13 @@ struct PullRequestSheet: View {
     @State private var confirmingMerge = false
     let trama: LiveTrama
 
+    init(trama: LiveTrama, mode: PullRequestPlanner.Mode) {
+        self.trama = trama
+        let planner = PullRequestPlanner()
+        planner.mode = mode
+        _planner = StateObject(wrappedValue: planner)
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             header
@@ -283,14 +299,6 @@ struct PullRequestSheet: View {
                     .font(Theme.serif(32))
             }
             Spacer()
-            Picker("Modo", selection: $planner.mode) {
-                Text("Abrir PRs").tag(PullRequestPlanner.Mode.pullRequest)
-                Text("Mesclar direto").tag(PullRequestPlanner.Mode.merge)
-            }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .frame(width: 230)
-            .padding(.bottom, 4)
             if planner.mode == .pullRequest {
             HStack(spacing: 10) {
                 Text("Abrir como rascunho")
@@ -605,6 +613,7 @@ private struct TonePill: View {
 }
 
 private struct PullRequestRowView: View {
+    @EnvironmentObject var model: AppModel
     let row: PullRequestPlanRow
     @ObservedObject var planner: PullRequestPlanner
     @State private var picking = false
@@ -766,7 +775,18 @@ private struct PullRequestRowView: View {
                 note(row.missingTool.map { "sem o \($0) instalado" } ?? "este provedor abre pelo link")
             case .blocked:
                 TonePill(text: blockedTitle)
-                note(blockedNote)
+                if row.blocker == .merged || row.blocker == .closed {
+                    Button("Descartar") {
+                        planner.discard(row.repo)
+                        Task { await model.forgetPullRequests(planner.slug, repos: [row.repo]) }
+                    }
+                    .buttonStyle(.plain)
+                    .font(.system(size: 11.5))
+                    .foregroundStyle(Theme.emberLight)
+                    .help("Esquece o PR #\(number) desta trama, para um novo poder ser aberto")
+                } else {
+                    note(blockedNote)
+                }
             }
             }
         }

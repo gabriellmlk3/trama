@@ -40,12 +40,12 @@ struct GitRepoDetail: View {
             if let o = overview {
                 ViewThatFits(in: .horizontal) {
                     HStack(alignment: .top, spacing: 14) {
-                        BranchThread(overview: o, status: status, repo: repo.name, worktree: path, compare: compare, onCompare: onCompare)
+                        BranchThread(overview: o, status: status, repo: repo.name, worktree: path, compare: compare, onCompare: onCompare, trama: trama)
                         WorktreesCard(overview: o, repo: repo, trama: trama)
                             .frame(width: 300)
                     }
                     VStack(spacing: 14) {
-                        BranchThread(overview: o, status: status, repo: repo.name, worktree: path, compare: compare, onCompare: onCompare)
+                        BranchThread(overview: o, status: status, repo: repo.name, worktree: path, compare: compare, onCompare: onCompare, trama: trama)
                         WorktreesCard(overview: o, repo: repo, trama: trama)
                     }
                 }
@@ -339,10 +339,16 @@ struct WorktreesCard: View {
                                     .font(.system(size: 12))
                                     .foregroundStyle(w.changed > 0 ? Theme.text3 : Theme.faded)
                             }
-                            if !current(w), !w.branch.isEmpty, let mine = overview.worktrees.first(where: current), !mine.branch.isEmpty {
+                            if !w.branch.isEmpty {
                                 Menu {
-                                    Button("Mesclar \(mine.branch) em \(w.branch)") { pending = (mine, w) }
-                                    Button("Trazer \(w.branch) para \(mine.branch)") { pending = (w, mine) }
+                                    if !current(w), let mine = overview.worktrees.first(where: current), !mine.branch.isEmpty {
+                                        Button("Mesclar \(mine.branch) em \(w.branch)") { pending = (mine, w) }
+                                        Button("Trazer \(w.branch) para \(mine.branch)") { pending = (w, mine) }
+                                        Divider()
+                                    }
+                                    if current(w) {
+                                        Button("Trazer outra branch para \(w.branch)…") { pickingBranch = true }
+                                    }
                                 } label: {
                                     Image(systemName: "arrow.triangle.merge")
                                         .font(.system(size: 11.5))
@@ -356,7 +362,7 @@ struct WorktreesCard: View {
                                 .buttonStyle(.plain)
                                 .menuIndicator(.hidden)
                                 .fixedSize()
-                                .help("Fazer merge entre este worktree e \(title(w))")
+                                .help("Fazer merge em \(title(w))")
                             }
                         }
                         .padding(.horizontal, 10)

@@ -18,6 +18,9 @@ struct ConflictsPanel: View {
     @State private var resolving: ConflictFile?
     @State private var advance = false
     @State private var confirmingAbort = false
+    @State private var showingAll = false
+
+    private let collapsedLimit = 8
 
     var body: some View {
         VStack(spacing: 0) {
@@ -81,9 +84,17 @@ struct ConflictsPanel: View {
                     }
                 }
                 if !c.files.isEmpty {
+                    let visible = showingAll ? c.files : Array(c.files.prefix(collapsedLimit))
                     VStack(spacing: 4) {
-                        ForEach(c.files) { f in
+                        ForEach(visible) { f in
                             row(f)
+                        }
+                        if c.files.count > collapsedLimit {
+                            Button(showingAll ? "Mostrar menos" : "Mostrar todos (\(c.files.count - collapsedLimit) ocultos)") {
+                                showingAll.toggle()
+                            }
+                            .buttonStyle(GhostButton(compact: true))
+                            .padding(.top, 4)
                         }
                     }
                 }

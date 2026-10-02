@@ -236,6 +236,20 @@ extension Workspace {
         return made
     }
 
+    public func commitAll(_ slug: String, messages: [String: String]) -> [String: String] {
+        var failures: [String: String] = [:]
+        for (name, message) in messages {
+            do {
+                let wt = worktreePath(slug, try repo(name).name)
+                let paths = Git.fileChanges(wt).map(\.path)
+                try commitChanges(slug, repo: name, paths: paths, message: message)
+            } catch {
+                failures[name] = errorMessage(error)
+            }
+        }
+        return failures
+    }
+
     func worktreeSummaries(_ r: RepoConfig, base: String) -> [WorktreeSummary] {
         Git.listWorktrees(r.path).filter { !$0.bare && !$0.prunable }.map { info in
             let ref = Git.baseRef(info.path, base)

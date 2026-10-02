@@ -152,6 +152,22 @@ final class AppModel: ObservableObject {
         }
     }
 
+    func hasLivePullRequests(_ trama: LiveTrama) -> Bool {
+        guard !trama.trama.prs.isEmpty else { return false }
+        guard let infos = pullRequests[trama.slug] else { return true }
+        return infos.isEmpty || infos.contains { $0.state != "merged" && $0.state != "closed" }
+    }
+
+    func forgetPullRequests(_ slug: String, repos: [String]) async {
+        do {
+            try await Core.run { _ = try $0.forgetPullRequests(slug, repos: repos) }
+            await refresh()
+            await refreshPullRequests()
+        } catch {
+            showError(errorMessage(error))
+        }
+    }
+
     @discardableResult
     func mergeIntoBranches(_ slug: String, targets: [String: String], only: Set<String>) async -> Bool {
         busy = true
@@ -294,6 +310,14 @@ final class AppModel: ObservableObject {
         }
     }
 
+    func setBase(_ slug: String, base: String) async {
+        await perform(success: "Base da trama agora é \(base)") { _ = try $0.setBase(slug, base: base) }
+    }
+
+    func baseCandidates(repos: [String], excluding branch: String? = nil) async -> [String] {
+        (try? await Core.run { try $0.baseCandidates(repos: repos, excluding: branch) }) ?? []
+    }
+
     func pull(_ slug: String, _ repo: String) async {
         await perform(success: "\(repo) entrou na trama") { _ = try $0.pullRepos(slug, [repo]) }
     }
@@ -357,6 +381,34 @@ final class AppModel: ObservableObject {
 
     func commit(_ slug: String, repo: String, paths: [String], message: String) async -> Bool {
         await perform(success: "Commit feito em \(repo)") { _ = try $0.commitChanges(slug, repo: repo, paths: paths, message: message) }
+    }
+
+    func suggestCommitMessage(_ slug: String, repo: String) async -> String? {
+        do {
+            return try await Core.run { try $0.suggestCommitMessage(slug, repo: repo) }
+        } catch {
+            showError("\(repo): \(errorMessage(error))")
+            return nil
+        }
+    }
+
+    func commitAll(_ slug: String, messages: [String: String]) async -> Bool {
+        busy = true
+        defer { busy = false }
+        let failures: [String: String]
+        do {
+            failures = try await Core.run { $0.commitAll(slug, messages: messages) }
+        } catch {
+            showError(errorMessage(error))
+            return false
+        }
+        await refresh()
+        if failures.isEmpty {
+            showNotice("\(messages.count) \(plural(messages.count, "commit feito", "commits feitos"))")
+            return true
+        }
+        showError(failures.sorted(by: { $0.key < $1.key }).map { "\($0.key): \($0.value)" }.joined(separator: "\n"))
+        return false
     }
 
     func discard(_ slug: String, repo: String, paths: [String]) async -> Bool {

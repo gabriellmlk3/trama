@@ -441,6 +441,17 @@ final class FlowTests: XCTestCase {
         XCTAssertFalse(try lab.git(other, "log", "-1", "--format=%s").isEmpty)
     }
 
+    func testSetBaseChangesTramaBase() throws {
+        let w = try lab.workspace(withContext: false)
+        let api = lab.repos["rebocs_api"]!
+        try lab.git(api, "branch", "develop")
+        let (t, _) = try w.newTrama(NewTramaOptions(title: "Base", repos: ["api"], noFetch: true))
+        XCTAssertTrue(try w.baseCandidates(repos: ["api"], excluding: t.branch).contains("develop"))
+        let updated = try w.setBase(t.slug, base: "develop")
+        XCTAssertEqual(updated.base, "develop")
+        XCTAssertThrowsError(try w.setBase(t.slug, base: "nao-existe"))
+    }
+
     func testWithoutContextRepo() throws {
         let w = try lab.workspace(withContext: false)
         let (t, _) = try w.newTrama(NewTramaOptions(title: "Solo", repos: ["api"], noFetch: true))
@@ -617,6 +628,19 @@ final class FlowTests: XCTestCase {
         XCTAssertEqual(ciState([["status": "COMPLETED", "conclusion": "FAILURE"], ["status": "IN_PROGRESS"]]), CIState.failure)
         XCTAssertEqual(ciState([["status": "COMPLETED", "conclusion": "SUCCESS"]]), CIState.success)
         XCTAssertEqual(ciState([]), CIState.none)
+    }
+
+    func testForgettingPullRequestsKeepsTheOthers() throws {
+        let w = try lab.workspace()
+        let (t, _) = try w.newTrama(NewTramaOptions(title: "Descarte", repos: ["api", "admin"], noFetch: true))
+        try w.updateTrama(t.slug) {
+            $0.prs = ["rebocs_api": "https://github.com/x/rebocs_api/pull/1", "rebocs-admin": "https://github.com/x/rebocs-admin/pull/2"]
+        }
+        let updated = try w.forgetPullRequests(t.slug, repos: ["rebocs_api"])
+        XCTAssertEqual(updated.prs, ["rebocs-admin": "https://github.com/x/rebocs-admin/pull/2"])
+        XCTAssertEqual(try w.trama(t.slug).prs.keys.sorted(), ["rebocs-admin"])
+        XCTAssertTrue(try w.readCapsule(t.slug).journal.contains { $0.text.contains("PRs descartados") })
+        XCTAssertTrue(try w.forgetPullRequests(t.slug, repos: ["rebocs-admin"]).prs.isEmpty)
     }
 
     func testRemoteBranchesCanBeCreatedRenamedAndDeleted() throws {
@@ -870,6 +894,23 @@ final class FlowTests: XCTestCase {
         XCTAssertEqual(try w.mergeWorktrees(repo: "api", from: wt, into: main).situation, "atualizado")
         XCTAssertThrowsError(try w.mergeWorktrees(repo: "api", from: wt, into: wt))
         XCTAssertThrowsError(try w.mergeWorktrees(repo: "api", from: wt, into: lab.root))
+    }
+
+    func testMergeAnyBranchIntoWorktree() throws {
+        let w = try lab.workspace()
+        let main = lab.repos["rebocs_api"]!
+        let (t, _) = try w.newTrama(NewTramaOptions(title: "Qualquer branch", repos: ["api"], noFetch: true))
+        let wt = w.worktreePath(t.slug, "rebocs_api")
+        _ = try Git.run(main, "branch", "outra")
+        _ = try Git.run(main, "worktree", "add", "-q", lab.root + "/outra-wt", "outra")
+        try lab.commit(lab.root + "/outra-wt", "outra.txt", "o\n", "outra")
+        let branches = try w.mergeableBranches(repo: "api", worktree: wt, fetch: false)
+        XCTAssertTrue(branches.contains("outra"))
+        XCTAssertFalse(branches.contains(t.branch))
+        XCTAssertEqual(try w.mergeBranch(repo: "api", ref: "outra", into: wt).situation, "mesclado")
+        XCTAssertEqual(try File.read(wt + "/outra.txt"), "o\n")
+        XCTAssertEqual(try w.mergeBranch(repo: "api", ref: "outra", into: wt).situation, "atualizado")
+        XCTAssertThrowsError(try w.mergeBranch(repo: "api", ref: "nao-existe", into: wt))
     }
 
     func testEditorIsResolvedInsideTheWorktree() throws {

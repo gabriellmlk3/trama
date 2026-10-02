@@ -58,7 +58,7 @@ struct TramaHeader: View {
     let trama: LiveTrama
     @State private var confirmingArchive = false
     @State private var confirmingRemoval = false
-    @State private var choosingPullRequests = false
+    @State private var pullRequestMode: PullRequestPlanner.Mode?
     @State private var mergeSource: LiveTrama?
 
     var base: String {
@@ -149,23 +149,19 @@ struct TramaHeader: View {
                     .buttonStyle(EmberButton())
                 } else {
                     Button {
-                        Task { await model.park(trama.slug) }
+                        pullRequestMode = .pullRequest
                     } label: {
-                        HStack(spacing: 8) {
-                            Image(systemName: "pause.fill")
-                                .font(.system(size: 10))
-                            Text("Estacionar")
-                            KeyCap(text: "⇧⌘P")
-                        }
-                    }
-                    .buttonStyle(GhostButton())
-                    Button {
-                        choosingPullRequests = true
-                    } label: {
-                        Label(trama.trama.prs.isEmpty ? "Abrir PRs" : "Atualizar PRs", systemImage: "arrow.triangle.pull")
+                        Label(model.hasLivePullRequests(trama) ? "Atualizar PRs" : "Abrir PRs", systemImage: "arrow.triangle.pull")
                     }
                     .buttonStyle(GhostButton())
                     .help("Escolhe a branch de destino de cada repositório, envia as branches e abre (ou atualiza) os PRs, ligados entre si")
+                    Button {
+                        pullRequestMode = .merge
+                    } label: {
+                        Label("Mesclar direto", systemImage: "arrow.triangle.merge")
+                    }
+                    .buttonStyle(GhostButton())
+                    .help("Mescla a branch da trama direto na branch de destino de cada repositório, sem abrir PR")
                     Button {
                         model.openClaudeInAll(trama)
                     } label: {
@@ -194,8 +190,8 @@ struct TramaHeader: View {
                 Text("Faz merge da branch \(source.branch) em \(trama.branch), nos repositórios que as duas têm. Se algum worktree daqui tiver mudanças não commitadas ou o merge previr conflito, “Fazer merge” não mescla nada; “Mesclar e resolver conflitos” deixa o merge em andamento na aba Git.")
             }
         }
-        .sheet(isPresented: $choosingPullRequests) {
-            PullRequestSheet(trama: trama)
+        .sheet(item: $pullRequestMode) { mode in
+            PullRequestSheet(trama: trama, mode: mode)
         }
         .confirmationDialog("Remover “\(trama.title)”?", isPresented: $confirmingRemoval) {
             Button("Remover e manter as branches", role: .destructive) { Task { await model.remove(trama.slug, deleteBranches: false) } }
