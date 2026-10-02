@@ -112,6 +112,7 @@ struct GitView: View {
     @State private var selectedFile: String?
     @State private var diff: [DiffLine] = []
     @State private var diffFile: String?
+    @State private var committingAll = false
 
     var currentRepo: String? {
         if let s = selectedRepo, trama.repos.contains(s) { return s }
@@ -132,14 +133,18 @@ struct GitView: View {
                     HStack(alignment: .top, spacing: repoListVisible ? 26 : 14) {
                         if repoListVisible {
                             VStack(alignment: .leading, spacing: 8) {
-                                Button {
-                                    withAnimation(.easeInOut(duration: 0.22)) { repoListVisible = false }
-                                } label: {
-                                    Image(systemName: "sidebar.left")
+                                HStack(spacing: 8) {
+                                    Button {
+                                        withAnimation(.easeInOut(duration: 0.22)) { repoListVisible = false }
+                                    } label: {
+                                        Image(systemName: "sidebar.left")
+                                    }
+                                    .buttonStyle(IconButton(size: 28))
+                                    .help("Recolher a lista de repositórios")
+                                    .accessibilityLabel("Recolher a lista de repositórios")
+                                    Spacer(minLength: 0)
+                                    commitAllButton
                                 }
-                                .buttonStyle(IconButton(size: 28))
-                                .help("Recolher a lista de repositórios")
-                                .accessibilityLabel("Recolher a lista de repositórios")
                                 RepoList(trama: trama, outside: outside, selected: currentRepo, horizontal: false) { select($0) }
                             }
                             .frame(width: 272)
@@ -156,6 +161,7 @@ struct GitView: View {
                             .accessibilityLabel("Mostrar a lista de repositórios")
                         }
                         detail
+                            .padding(.top, repoListVisible ? 36 : 0)
                     }
                 } else {
                     VStack(alignment: .leading, spacing: 18) {
@@ -172,12 +178,24 @@ struct GitView: View {
         .task(id: DiffKey(file: selectedFile, loadedAt: overview?.loadedAt ?? 0, signature: changeSignature)) {
             await loadDiff()
         }
+        .sheet(isPresented: $committingAll) { CommitAllSheet(trama: trama) }
         .onChange(of: trama.slug) { _, _ in
             selectedRepo = nil
             overview = nil
             selectedFile = nil
             diff = []
         }
+    }
+
+    var commitAllButton: some View {
+        Button {
+            committingAll = true
+        } label: {
+            Label("Commitar todos", systemImage: "checkmark.circle")
+        }
+        .buttonStyle(GhostButton(compact: true))
+        .disabled(!trama.status.contains(where: { $0.changed > 0 }))
+        .help("Commita as mudanças de todos os repositórios de uma vez, com uma mensagem para cada um")
     }
 
     var changeSignature: String {

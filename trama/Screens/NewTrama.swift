@@ -13,6 +13,7 @@ struct NewTramaView: View {
     @State private var context: String?
     @State private var openAgents = true
     @State private var sending = false
+    @State private var baseOptions: [String] = []
 
     var slug: String { slugify(title) }
     var chosen: [RepoConfig] { model.repos.filter { selected.contains($0.name) } }
@@ -56,10 +57,19 @@ struct NewTramaView: View {
                             Text("igual em todos, a partir de")
                                 .font(.system(size: 12))
                                 .foregroundStyle(Theme.faded)
-                            TextField("base de cada repo", text: $base)
-                                .textFieldStyle(.plain)
-                                .font(Theme.mono(12))
-                                .frame(width: 130)
+                            Menu {
+                                Button("padrão de cada repo") { base = "" }
+                                Divider()
+                                ForEach(baseOptions, id: \.self) { b in
+                                    Button(b) { base = b }
+                                }
+                            } label: {
+                                Text(base.isEmpty ? "padrão de cada repo" : "origin/\(base)")
+                                    .font(Theme.mono(12))
+                                    .foregroundStyle(base.isEmpty ? Theme.faded : Theme.text)
+                            }
+                            .menuStyle(.borderlessButton)
+                            .fixedSize()
                         }
                     }
                     GridRow(alignment: .top) {
@@ -154,6 +164,10 @@ struct NewTramaView: View {
                 Rectangle().fill(Color(hex: 0x22252B)).frame(height: 1)
             }
         }
+        .task(id: selected) {
+            baseOptions = await model.baseCandidates(repos: chosen.map(\.name))
+            if !base.isEmpty && !baseOptions.contains(base) { base = "" }
+        }
         .frame(width: 700)
         .background(Theme.field)
         .foregroundStyle(Theme.text)
@@ -188,37 +202,55 @@ struct NewTramaView: View {
 struct RepoPicker: View {
     @EnvironmentObject var model: AppModel
     @Binding var selected: Set<String>
+    @State private var query = ""
+
+    var visible: [RepoConfig] {
+        let q = query.trimmingCharacters(in: .whitespaces).lowercased()
+        guard !q.isEmpty else { return model.repos }
+        return model.repos.filter { $0.name.lowercased().contains(q) || $0.path.lowercased().contains(q) }
+    }
 
     var body: some View {
-        LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: 8, alignment: .leading)], alignment: .leading, spacing: 8) {
-            ForEach(model.repos) { r in
-                let on = selected.contains(r.name)
-                Button {
-                    if on {
-                        selected.remove(r.name)
-                    } else {
-                        selected.insert(r.name)
-                    }
-                } label: {
-                    HStack(spacing: 6) {
-                        if on {
-                            Image(systemName: "checkmark")
-                                .font(.system(size: 10, weight: .bold))
-                        }
-                        Text(r.name)
-                            .lineLimit(1)
-                    }
-                    .font(Theme.mono(12))
-                    .foregroundStyle(on ? Theme.emberText : Color(hex: 0x9A9EA8))
-                    .padding(.horizontal, 11)
-                    .frame(height: 30)
-                    .background(Capsule().fill(on ? Theme.ember.opacity(0.14) : Theme.surface))
-                    .overlay(Capsule().stroke(on ? Theme.ember.opacity(0.55) : Theme.line2, lineWidth: 1))
-                    .contentShape(Capsule())
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 10) {
+                HStack(spacing: 6) {
+                    Image(systemName: "magnifyingglass")
+                        .font(.system(size: 11))
+                        .foregroundStyle(Theme.faded)
+                    TextField("Filtrar repositórios", text: $query)
+                        .textFieldStyle(.plain)
+                        .font(.system(size: 12.5))
                 }
-                .buttonStyle(.plain)
-                .accessibilityAddTraits(on ? AccessibilityTraits.isSelected : AccessibilityTraits())
+                .padding(.horizontal, 10)
+                .frame(height: 28)
+                .background(RoundedRectangle(cornerRadius: 8).fill(Theme.surface))
+                .overlay(RoundedRectangle(cornerRadius: 8).stroke(Theme.line2, lineWidth: 1))
+                Text("\(selected.count) de \(model.repos.count)")
+                    .font(Theme.mono(11.5))
+                    .foregroundStyle(selected.isEmpty ? Theme.faded : Theme.emberText)
+                Spacer(minLength: 0)
+                Button("Todos") { selected.formUnion(visible.map(\.name)) }
+                    .buttonStyle(GhostButton(compact: true))
+                    .disabled(visible.allSatisfy { selected.contains($0.name) })
+                Button("Nenhum") { selected.subtract(visible.map(\.name)) }
+                    .buttonStyle(GhostButton(compact: true))
+                    .disabled(!visible.contains { selected.contains($0.name) })
             }
+
+            ScrollView {
+                VStack(spacing: 4) {
+                    ForEach(visible) { r in row(r) }
+                    if visible.isEmpty {
+                        Text("Nenhum repositório encontrado")
+                            .font(.system(size: 12))
+                            .foregroundStyle(Theme.faded)
+                            .frame(maxWidth: .infinity, minHeight: 48)
+                    }
+                }
+            }
+            .frame(maxHeight: 190)
+            .fixedSize(horizontal: false, vertical: visible.count <= 5)
+
             Button {
                 let paths = Terminal.choosePaths(multiple: true, title: "Cadastrar mais repositórios")
                 Task { await model.addRepos(paths) }
@@ -227,12 +259,42 @@ struct RepoPicker: View {
                     .font(.system(size: 12))
                     .foregroundStyle(Theme.faded)
                     .padding(.horizontal, 11)
-                    .frame(height: 30)
+                    .frame(height: 28)
                     .overlay(Capsule().stroke(Theme.thread, style: StrokeStyle(lineWidth: 1, dash: [3, 3])))
                     .contentShape(Capsule())
             }
             .buttonStyle(.plain)
         }
+    }
+
+    func row(_ r: RepoConfig) -> some View {
+        let on = selected.contains(r.name)
+        return Button {
+            if on { selected.remove(r.name) } else { selected.insert(r.name) }
+        } label: {
+            HStack(spacing: 10) {
+                Image(systemName: on ? "checkmark.square.fill" : "square")
+                    .font(.system(size: 14))
+                    .foregroundStyle(on ? Theme.ember : Theme.faded)
+                Text(r.name)
+                    .font(Theme.mono(12.5))
+                    .foregroundStyle(on ? Theme.emberText : Theme.text)
+                    .lineLimit(1)
+                Spacer(minLength: 8)
+                Text(Paths.abbreviate(r.path))
+                    .font(Theme.mono(11))
+                    .foregroundStyle(Theme.faded)
+                    .lineLimit(1)
+                    .truncationMode(.head)
+            }
+            .padding(.horizontal, 10)
+            .frame(height: 32)
+            .background(RoundedRectangle(cornerRadius: 8).fill(on ? Theme.ember.opacity(0.10) : Theme.surface))
+            .overlay(RoundedRectangle(cornerRadius: 8).stroke(on ? Theme.ember.opacity(0.45) : Theme.line2, lineWidth: 1))
+            .contentShape(RoundedRectangle(cornerRadius: 8))
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(on ? AccessibilityTraits.isSelected : AccessibilityTraits())
     }
 }
 

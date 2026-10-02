@@ -51,11 +51,11 @@ struct ChangesPane: View {
     var selected: FileChange? { changes.first(where: { $0.id == selectedFile }) }
 
     var commitPanel: some View {
-        CommitPanel(trama: trama, repo: repo, merging: merging, changes: changes, unchecked: $unchecked, onDiscardAll: { discarding = .files(changes) })
+        CommitPanel(trama: trama, repo: repo, merging: merging, changes: changes, unchecked: $unchecked)
     }
 
     var fileList: some View {
-        FileList(changes: changes, selectedFile: $selectedFile, unchecked: $unchecked, onDiscard: merging ? nil : { discarding = .files([$0]) })
+        FileList(changes: changes, selectedFile: $selectedFile, unchecked: $unchecked, onDiscard: merging ? nil : { discarding = .files([$0]) }, onDiscardAll: merging ? nil : { discarding = .files(changes) })
     }
 
     var diffPane: some View {
@@ -76,6 +76,14 @@ struct ChangesPane: View {
     }
 
     var body: some View {
+        VStack(spacing: 14) {
+            AgentCard(status: status)
+            content
+        }
+    }
+
+    @ViewBuilder
+    var content: some View {
         if changes.isEmpty {
             VStack(spacing: 14) {
                 GitCard {
@@ -88,24 +96,21 @@ struct ChangesPane: View {
                     .padding(18)
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                AgentCard(status: status)
             }
         } else {
             ViewThatFits(in: .horizontal) {
-                HStack(alignment: .top, spacing: 14) {
-                    VStack(spacing: 14) {
+                VStack(spacing: 14) {
+                    HStack(alignment: .top, spacing: 14) {
                         fileList
-                        commitPanel
-                        AgentCard(status: status)
+                            .frame(width: 252)
+                        diffPane
                     }
-                    .frame(width: 252)
-                    diffPane
+                    commitPanel
                 }
                 VStack(spacing: 14) {
                     fileList
                     commitPanel
                     diffPane
-                    AgentCard(status: status)
                 }
             }
             .confirmationDialog(discarding?.title ?? "", isPresented: Binding(get: { discarding != nil }, set: { if !$0 { discarding = nil } }), presenting: discarding) { request in
@@ -154,16 +159,19 @@ struct Delta: View {
 }
 
 struct FileList: View {
+    @EnvironmentObject var model: AppModel
     @Binding var selectedFile: String?
     let unchecked: Binding<Set<String>>?
     let changes: [FileChange]
     let onDiscard: ((FileChange) -> Void)?
+    let onDiscardAll: (() -> Void)?
 
-    init(changes: [FileChange], selectedFile: Binding<String?>, unchecked: Binding<Set<String>>? = nil, onDiscard: ((FileChange) -> Void)? = nil) {
+    init(changes: [FileChange], selectedFile: Binding<String?>, unchecked: Binding<Set<String>>? = nil, onDiscard: ((FileChange) -> Void)? = nil, onDiscardAll: (() -> Void)? = nil) {
         self.changes = changes
         self._selectedFile = selectedFile
         self.unchecked = unchecked
         self.onDiscard = onDiscard
+        self.onDiscardAll = onDiscardAll
     }
 
     var body: some View {
@@ -177,6 +185,25 @@ struct FileList: View {
                     Delta(added: changes.reduce(0) { $0 + $1.added }, removed: changes.reduce(0) { $0 + $1.removed })
                 }
                 .padding(.horizontal, 6)
+                if let unchecked {
+                    let allChosen = !changes.contains { unchecked.wrappedValue.contains($0.id) }
+                    HStack {
+                        Button(allChosen ? "Desmarcar tudo" : "Marcar tudo") {
+                            unchecked.wrappedValue = allChosen ? Set(changes.map(\.id)) : []
+                        }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(Theme.faded)
+                        Spacer()
+                        if let onDiscardAll {
+                            Button("Descartar tudo", action: onDiscardAll)
+                                .buttonStyle(.plain)
+                                .foregroundStyle(Theme.dangerText)
+                                .disabled(model.busy)
+                        }
+                    }
+                    .font(.system(size: 11.5))
+                    .padding(.horizontal, 6)
+                }
                 VStack(spacing: 3) {
                     ForEach(changes) { c in
                         FileRow(change: c, selected: c.id == selectedFile, checked: unchecked.map { !$0.wrappedValue.contains(c.id) }, discard: onDiscard.map { f in { f(c) } }, toggle: {
@@ -270,6 +297,9 @@ struct DiffPane: View {
     var onDiscardFile: ((FileChange) -> Void)?
     var onDiscardLines: ((FileChange, Set<Int>) -> Void)?
     @State private var picked: Set<Int> = []
+    @State private var dragAnchor: Int?
+    @State private var dragBase: Set<Int> = []
+    @State private var dragAdds = true
 
     var canPickLines: Bool { onDiscardLines != nil && change?.untracked == false }
 
@@ -284,6 +314,26 @@ struct DiffPane: View {
 
     func toggle(_ id: Int) {
         if picked.contains(id) { picked.remove(id) } else { picked.insert(id) }
+    }
+
+    func lineIndex(atY y: CGFloat) -> Int {
+        min(max(Int(y / 20), 0), lines.count - 1)
+    }
+
+    func drag(_ value: DragGesture.Value) {
+        guard canPickLines else { return }
+        if dragAnchor == nil {
+            let start = lineIndex(atY: value.startLocation.y)
+            guard lines[start].kind == .added || lines[start].kind == .removed else { return }
+            dragAnchor = start
+            dragBase = picked
+            dragAdds = !picked.contains(lines[start].id)
+        }
+        guard let anchor = dragAnchor else { return }
+        let current = lineIndex(atY: value.location.y)
+        let range = min(anchor, current)...max(anchor, current)
+        let covered = Set(lines[range].filter { $0.kind == .added || $0.kind == .removed }.map(\.id))
+        picked = dragAdds ? dragBase.union(covered) : dragBase.subtracting(covered)
     }
 
     var contentWidth: CGFloat {
@@ -365,12 +415,17 @@ struct DiffPane: View {
                                     )
                                 }
                             }
+                            .gesture(
+                                DragGesture(minimumDistance: 4)
+                                    .onChanged(drag)
+                                    .onEnded { _ in dragAnchor = nil }
+                            )
                             .frame(minWidth: max(geo.size.width, contentWidth), alignment: .topLeading)
                             .padding(.vertical, 4)
                         }
                         .scrollIndicators(.automatic)
                     }
-                    .frame(height: min(420, CGFloat(lines.count) * 20 + 12))
+                    .frame(minHeight: min(420, CGFloat(lines.count) * 20 + 12), maxHeight: .infinity)
                     .id(change?.id)
                     .transition(.opacity)
                     if !picked.isEmpty, let c = change {
@@ -398,7 +453,7 @@ struct DiffPane: View {
                 }
             }
         }
-        .frame(maxWidth: .infinity)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .animation(.easeOut(duration: 0.15), value: picked.isEmpty)
         .onChange(of: change?.id) { _, _ in picked = [] }
         .onChange(of: lines) { _, _ in picked = [] }
@@ -476,7 +531,7 @@ struct DiffRow: View {
         }
         .contentShape(Rectangle())
         .onTapGesture { onPick?() }
-        .help(onPick == nil ? "" : "Clique para escolher esta linha")
+        .help(onPick == nil ? "" : "Clique ou arraste para escolher linhas")
     }
 }
 
@@ -536,40 +591,32 @@ struct AgentCard: View {
     var body: some View {
         if let ag = status.primaryAgent {
             GitCard {
-                VStack(alignment: .leading, spacing: 10) {
+                VStack(alignment: .leading, spacing: 4) {
                     HStack(spacing: 8) {
                         AgentBadge(agent: ag)
-                        Text("Agente neste worktree")
-                            .font(.system(size: 12.5, weight: .semibold))
+                        Text("·").foregroundStyle(Theme.faded)
+                        Text(Paths.abbreviate(ag.cwd))
+                            .font(Theme.mono(11))
+                            .foregroundStyle(Theme.text3)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                        Spacer(minLength: 8)
+                        Text(relativeTime(ag.updatedAt))
+                            .font(.system(size: 11))
+                            .foregroundStyle(Theme.faded)
                     }
                     if let m = ag.message, !m.isEmpty {
                         Text(m)
                             .font(.system(size: 12))
                             .foregroundStyle(Theme.irisText)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                    VStack(alignment: .leading, spacing: 6) {
-                        row("estado", ag.stateLabel)
-                        row("pasta", Paths.abbreviate(ag.cwd))
-                        row("atualizado", relativeTime(ag.updatedAt))
+                            .lineLimit(2)
                     }
                 }
-                .padding(14)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
-        }
-    }
-
-    func row(_ label: String, _ value: String) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 10) {
-            Text(label)
-                .font(.system(size: 11))
-                .foregroundStyle(Theme.faded)
-                .frame(width: 66, alignment: .leading)
-            Text(value)
-                .font(Theme.mono(11))
-                .foregroundStyle(Theme.text3)
-                .lineLimit(1)
-                .truncationMode(.middle)
+            .help("Agente neste worktree")
         }
     }
 }
@@ -581,7 +628,6 @@ struct CommitPanel: View {
     let merging: Bool
     let changes: [FileChange]
     @Binding var unchecked: Set<String>
-    let onDiscardAll: () -> Void
     @State private var message = ""
 
     var chosen: [String] { changes.map(\.id).filter { !unchecked.contains($0) } }
@@ -606,20 +652,6 @@ struct CommitPanel: View {
                         .foregroundStyle(Theme.waitText)
                 }
                 HStack {
-                    Button(chosen.count == changes.count ? "Desmarcar tudo" : "Marcar tudo") {
-                        unchecked = chosen.count == changes.count ? Set(changes.map(\.id)) : []
-                    }
-                    .buttonStyle(.plain)
-                    .font(.system(size: 11.5))
-                    .foregroundStyle(Theme.faded)
-                    if !merging {
-                        Button("Descartar tudo", action: onDiscardAll)
-                            .buttonStyle(.plain)
-                            .font(.system(size: 11.5))
-                            .foregroundStyle(Theme.dangerText)
-                            .disabled(model.busy)
-                            .padding(.leading, 6)
-                    }
                     Spacer()
                     Button {
                         let paths = chosen

@@ -38,12 +38,12 @@ struct GitRepoDetail: View {
             if let o = overview {
                 ViewThatFits(in: .horizontal) {
                     HStack(alignment: .top, spacing: 14) {
-                        BranchThread(overview: o, status: status)
+                        BranchThread(overview: o, status: status, trama: trama)
                         WorktreesCard(overview: o, repo: repo, trama: trama)
                             .frame(width: 300)
                     }
                     VStack(spacing: 14) {
-                        BranchThread(overview: o, status: status)
+                        BranchThread(overview: o, status: status, trama: trama)
                         WorktreesCard(overview: o, repo: repo, trama: trama)
                     }
                 }
@@ -265,6 +265,7 @@ struct WorktreesCard: View {
     let trama: LiveTrama
     @State private var pending: (from: WorktreeSummary, into: WorktreeSummary)?
     @State private var resolvingIn: WorktreeSummary?
+    @State private var pickingBranchFor: WorktreeSummary?
 
     func title(_ w: WorktreeSummary) -> String {
         if w.isPrimary { return "Cópia principal" }
@@ -325,10 +326,14 @@ struct WorktreesCard: View {
                                     .font(.system(size: 12))
                                     .foregroundStyle(w.changed > 0 ? Theme.text3 : Theme.faded)
                             }
-                            if !current(w), !w.branch.isEmpty, let mine = overview.worktrees.first(where: current), !mine.branch.isEmpty {
+                            if !w.branch.isEmpty {
                                 Menu {
-                                    Button("Mesclar \(mine.branch) em \(w.branch)") { pending = (mine, w) }
-                                    Button("Trazer \(w.branch) para \(mine.branch)") { pending = (w, mine) }
+                                    if !current(w), let mine = overview.worktrees.first(where: current), !mine.branch.isEmpty {
+                                        Button("Mesclar \(mine.branch) em \(w.branch)") { pending = (mine, w) }
+                                        Button("Trazer \(w.branch) para \(mine.branch)") { pending = (w, mine) }
+                                        Divider()
+                                    }
+                                    Button("Mesclar outra branch em \(w.branch)…") { pickingBranchFor = w }
                                 } label: {
                                     Image(systemName: "arrow.triangle.merge")
                                         .font(.system(size: 11.5))
@@ -342,7 +347,7 @@ struct WorktreesCard: View {
                                 .buttonStyle(.plain)
                                 .menuIndicator(.hidden)
                                 .fixedSize()
-                                .help("Fazer merge entre este worktree e \(title(w))")
+                                .help("Fazer merge em \(title(w))")
                             }
                         }
                         .padding(.horizontal, 10)
@@ -363,6 +368,9 @@ struct WorktreesCard: View {
         }
         .sheet(item: $resolvingIn) { w in
             ConflictsSheet(repo: repo.name, worktree: w.path, title: title(w))
+        }
+        .sheet(item: $pickingBranchFor) { w in
+            MergeBranchSheet(repo: repo.name, worktree: w, title: title(w))
         }
         .alert("Fazer merge?", isPresented: Binding(get: { pending != nil }, set: { if !$0 { pending = nil } })) {
             Button("Fazer merge") {
@@ -408,5 +416,93 @@ struct ConflictsSheet: View {
         .padding(20)
         .frame(minWidth: 640, minHeight: 280)
         .background(Theme.background)
+    }
+}
+
+struct MergeBranchSheet: View {
+    @EnvironmentObject var model: AppModel
+    @Environment(\.dismiss) private var dismiss
+    let repo: String
+    let worktree: WorktreeSummary
+    let title: String
+
+    @State private var branches: [String] = []
+    @State private var loaded = false
+    @State private var query = ""
+    @State private var selected: String?
+
+    var filtered: [String] {
+        let q = query.trimmingCharacters(in: .whitespaces)
+        return q.isEmpty ? branches : branches.filter { $0.localizedCaseInsensitiveContains(q) }
+    }
+
+    func merge(allowConflicts: Bool) {
+        guard let branch = selected else { return }
+        dismiss()
+        Task { await model.mergeBranch(repo, branch: branch, into: worktree.path, label: title, allowConflicts: allowConflicts) }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack {
+                Text("Mesclar uma branch em \(title)")
+                    .font(.system(size: 14, weight: .semibold))
+                Spacer()
+                Button("Cancelar") { dismiss() }
+                    .buttonStyle(GhostButton(compact: true))
+                    .keyboardShortcut(.cancelAction)
+            }
+            Text("A branch escolhida entra em \(worktree.branch). Se o merge previr conflito, “Mesclar” não faz nada; “Mesclar e resolver conflitos” deixa o merge em andamento.")
+                .font(.system(size: 12))
+                .foregroundStyle(Theme.faded)
+                .fixedSize(horizontal: false, vertical: true)
+            TextField("Filtrar branches", text: $query)
+                .textFieldStyle(.roundedBorder)
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 2) {
+                    ForEach(filtered, id: \.self) { b in
+                        Button {
+                            selected = b
+                        } label: {
+                            Text(b)
+                                .font(Theme.mono(12))
+                                .foregroundStyle(selected == b ? Theme.text : Theme.text2)
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                                .padding(.horizontal, 10)
+                                .frame(maxWidth: .infinity, minHeight: 28, alignment: .leading)
+                                .background(RoundedRectangle(cornerRadius: 7).fill(selected == b ? Theme.surface2 : Color.clear))
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    if loaded, filtered.isEmpty {
+                        Text(branches.isEmpty ? "Não há outras branches neste repositório." : "Nenhuma branch encontrada.")
+                            .font(.system(size: 12))
+                            .foregroundStyle(Theme.faded)
+                            .padding(10)
+                    }
+                }
+            }
+            .frame(height: 220)
+            HStack {
+                Spacer()
+                Button("Mesclar e resolver conflitos") { merge(allowConflicts: true) }
+                    .buttonStyle(GhostButton(compact: true))
+                    .disabled(selected == nil)
+                Button("Mesclar") { merge(allowConflicts: false) }
+                    .buttonStyle(GhostButton(compact: true))
+                    .disabled(selected == nil)
+            }
+        }
+        .padding(20)
+        .frame(width: 460)
+        .background(Theme.background)
+        .task {
+            let repo = repo
+            let path = worktree.path
+            branches = (try? await Core.run { try $0.mergeableBranches(repo: repo, into: path) }) ?? []
+            loaded = true
+        }
     }
 }

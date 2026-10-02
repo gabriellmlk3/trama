@@ -50,9 +50,55 @@ enum ThreadLayout: String, CaseIterable {
     static let storageKey = "branchThreadLayout"
 }
 
+struct BaseMenu: View {
+    @EnvironmentObject var model: AppModel
+    let trama: LiveTrama
+    let current: String
+    @State private var branches: [String] = []
+
+    var body: some View {
+        Menu {
+            ForEach(branches, id: \.self) { b in
+                Button {
+                    guard b != current else { return }
+                    Task { await model.setBase(trama.slug, base: b) }
+                } label: {
+                    if b == current { Label(b, systemImage: "checkmark") } else { Text(b) }
+                }
+            }
+        } label: {
+            HStack(spacing: 5) {
+                Text("a partir de")
+                    .foregroundStyle(Theme.faded)
+                Text("origin/\(current)")
+                    .font(Theme.mono(11.5))
+                    .foregroundStyle(Theme.text2)
+                Image(systemName: "chevron.up.chevron.down")
+                    .font(.system(size: 8))
+                    .foregroundStyle(Theme.faded)
+            }
+            .font(.system(size: 11.5))
+            .padding(.horizontal, 9)
+            .frame(height: 24)
+            .background(RoundedRectangle(cornerRadius: 7).fill(Theme.surface))
+            .overlay(RoundedRectangle(cornerRadius: 7).stroke(Theme.line2, lineWidth: 1))
+        }
+        .menuStyle(.button)
+        .buttonStyle(.plain)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .disabled(model.busy)
+        .help("Escolher a branch em que esta trama se baseia (vale para todos os repositórios)")
+        .task(id: trama.slug) {
+            branches = await model.baseCandidates(repos: trama.repos, excluding: trama.branch)
+        }
+    }
+}
+
 struct BranchThread: View {
     let overview: GitOverview
     let status: RepoStatus
+    var trama: LiveTrama?
 
     @AppStorage(ThreadLayout.storageKey) private var layoutName = ThreadLayout.horizontal.rawValue
     @State private var drawn = false
@@ -104,6 +150,9 @@ struct BranchThread: View {
                 HStack(spacing: 10) {
                     Text("O fio desta branch")
                         .font(.system(size: 12.5, weight: .semibold))
+                    if let trama {
+                        BaseMenu(trama: trama, current: overview.base)
+                    }
                     Spacer()
                     if layout == .horizontal {
                         Text("cada ponto é um commit")

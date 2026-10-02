@@ -94,4 +94,36 @@ extension Workspace {
         }
         return result
     }
+
+    public func mergeableBranches(repo key: String, into target: String) throws -> [String] {
+        let r = try repo(key)
+        guard let to = Git.listWorktrees(r.path).first(where: { Paths.real($0.path) == Paths.real(target) }) else {
+            throw TramaError("não achei esse worktree em \(r.name)")
+        }
+        let local = (try? Git.run(r.path, "for-each-ref", "--format=%(refname:short)", "refs/heads")) ?? ""
+        let locals = local.split(separator: "\n").map(String.init).filter { $0 != to.branch }
+        let remotes = Git.remoteBranches(r.path)
+            .filter { $0 != to.branch && !locals.contains($0) }
+            .map { "origin/" + $0 }
+        return locals.sorted() + remotes.sorted()
+    }
+
+    public func mergeBranch(repo key: String, branch: String, into target: String, allowConflicts: Bool = false) throws -> ResumeResult {
+        let r = try repo(key)
+        guard let to = Git.listWorktrees(r.path).first(where: { Paths.real($0.path) == Paths.real(target) }) else {
+            throw TramaError("não achei esse worktree em \(r.name)")
+        }
+        guard !to.branch.isEmpty else { throw TramaError("o worktree de destino está com HEAD solto") }
+        guard branch != to.branch else { throw TramaError("escolha uma branch diferente de \(to.branch)") }
+        guard Git.refExists(r.path, branch) else { throw TramaError("a branch \(branch) não existe em \(r.name)") }
+        if !allowConflicts, Git.predictedConflict(to.path, branch) == "conflito" {
+            throw TramaError("o merge de \(branch) em \(to.branch) teria conflito · nada foi mesclado")
+        }
+        let result = performMerge(repo: r.name, into: to.path, branch: branch, allowConflicts: allowConflicts)
+        if result.situation == "mesclado" || result.situation == "conflito",
+           let t = try? tramas().first(where: { !$0.isArchived && to.path.hasPrefix(tramaPath($0.slug) + "/") }) {
+            try? addJournal(t.slug, "merge de \(branch) em \(r.name)")
+        }
+        return result
+    }
 }

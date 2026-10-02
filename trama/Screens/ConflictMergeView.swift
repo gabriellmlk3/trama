@@ -299,34 +299,55 @@ struct ConflictMergeView: View {
         editing = HunkEditing(id: h.id, text: base.joined(separator: "\n"))
     }
 
-    func codeLine(_ number: Int?, _ text: String, tint: Color?, strong: Bool = false, textColor: Color = Theme.text2) -> some View {
-        HStack(spacing: 0) {
-            Text(number.map(String.init) ?? "")
-                .font(Theme.mono(10))
-                .foregroundStyle(Theme.faded)
-                .frame(width: numberWidth, alignment: .trailing)
-                .padding(.trailing, 8)
-            Text(text.isEmpty ? " " : text)
-                .font(Theme.mono(11.5))
-                .foregroundStyle(textColor)
-                .lineLimit(1)
-                .truncationMode(.tail)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.trailing, 6)
+    func codeColumns(_ lines: [String], start: Int, width: CGFloat, tint: Color?, strong: @escaping (Int) -> Bool = { _ in false }, textColor: @escaping (Int) -> Color = { _ in Theme.text2 }, help: @escaping (Int) -> String = { _ in "" }, action: ((Int) -> Void)? = nil) -> some View {
+        let textWidth = max(0, width - numberWidth - 8)
+        func cell<C: View>(_ i: Int, _ content: C) -> some View {
+            Group {
+                if let action {
+                    Button { action(i) } label: { content.contentShape(Rectangle()) }
+                        .buttonStyle(.plain)
+                        .help(help(i))
+                } else {
+                    content
+                }
+            }
         }
-        .frame(height: lineHeight)
-        .background((tint ?? .clear).opacity(strong ? 0.34 : 0.16))
-        .clipped()
+        return HStack(spacing: 0) {
+            VStack(spacing: 0) {
+                ForEach(lines.indices, id: \.self) { i in
+                    cell(i, Text(String(start + i))
+                        .font(Theme.mono(10))
+                        .foregroundStyle(Theme.faded)
+                        .frame(width: numberWidth, alignment: .trailing)
+                        .padding(.trailing, 8)
+                        .frame(height: lineHeight)
+                        .background((tint ?? .clear).opacity(strong(i) ? 0.34 : 0.16)))
+                }
+            }
+            ScrollView(.horizontal) {
+                VStack(alignment: .leading, spacing: 0) {
+                    ForEach(lines.indices, id: \.self) { i in
+                        cell(i, Text(lines[i].isEmpty ? " " : lines[i])
+                            .font(Theme.mono(11.5))
+                            .foregroundStyle(textColor(i))
+                            .lineLimit(1)
+                            .fixedSize(horizontal: true, vertical: false)
+                            .padding(.trailing, 6)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .frame(height: lineHeight)
+                            .background((tint ?? .clear).opacity(strong(i) ? 0.34 : 0.16)))
+                    }
+                }
+                .frame(minWidth: textWidth, alignment: .leading)
+            }
+            .frame(width: textWidth)
+        }
     }
 
     func plainPane(_ lines: [String], start: Int, width: CGFloat) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
-            ForEach(Array(lines.enumerated()), id: \.offset) { i, l in
-                codeLine(start + i, l, tint: nil, textColor: Theme.text3)
-            }
-        }
-        .frame(width: width, alignment: .topLeading)
-        .clipped()
+        codeColumns(lines, start: start, width: width, tint: nil, textColor: { _ in Theme.text3 })
+            .frame(width: width, alignment: .topLeading)
+            .clipped()
     }
 
     func contextRows(_ id: Int, _ block: [String], _ off: Offsets, _ pw: CGFloat) -> some View {
@@ -367,17 +388,11 @@ struct ConflictMergeView: View {
         let content = ours ? h.ours : h.theirs
         let selected = ours ? selection(h).ours : selection(h).theirs
         return VStack(alignment: .leading, spacing: 0) {
-            ForEach(Array(content.enumerated()), id: \.offset) { index, line in
-                let on = selected.contains(index)
-                Button {
-                    toggle(h, index: index, ours: ours)
-                } label: {
-                    codeLine(start + index, line, tint: tone, strong: on, textColor: on ? Theme.text : Theme.text2)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .help(on ? "Tirar esta linha do resultado" : "Colocar esta linha no resultado")
-            }
+            codeColumns(content, start: start, width: width, tint: tone,
+                        strong: { selected.contains($0) },
+                        textColor: { selected.contains($0) ? Theme.text : Theme.text2 },
+                        help: { selected.contains($0) ? "Tirar esta linha do resultado" : "Colocar esta linha no resultado" },
+                        action: { toggle(h, index: $0, ours: ours) })
             if content.isEmpty {
                 Text(ours ? "(removido aqui)" : "(removido lá)")
                     .italic()
@@ -476,9 +491,7 @@ struct ConflictMergeView: View {
             } else if let resolution {
                 let lines = resolution.lines(for: h)
                 VStack(alignment: .leading, spacing: 0) {
-                    ForEach(Array(lines.enumerated()), id: \.offset) { i, l in
-                        codeLine(start + i, l, tint: Theme.ok, textColor: Theme.text)
-                    }
+                    codeColumns(lines, start: start, width: width, tint: Theme.ok, textColor: { _ in Theme.text })
                     if lines.isEmpty {
                         Text("(nada neste trecho)")
                             .italic()

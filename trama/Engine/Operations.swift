@@ -431,3 +431,39 @@ extension Workspace {
         return (t, nil)
     }
 }
+
+extension Workspace {
+    public func baseCandidates(repos names: [String], excluding branch: String? = nil) throws -> [String] {
+        let repos = try resolveRepos(names)
+        let lists = repos.map { r -> Set<String> in
+            let local = (try? Git.run(r.path, "for-each-ref", "--format=%(refname:short)", "refs/heads")).map {
+                $0.split(separator: "\n").map(String.init)
+            } ?? []
+            return Set(Git.remoteBranches(r.path) + local)
+        }
+        guard var common = lists.first else { return [] }
+        for l in lists.dropFirst() { common.formIntersection(l) }
+        if let branch { common.remove(branch) }
+        let preferred = Set(repos.compactMap(\.base) + [config.defaultBranch])
+        return common.sorted { a, b in
+            let pa = preferred.contains(a), pb = preferred.contains(b)
+            return pa != pb ? pa : a.localizedStandardCompare(b) == .orderedAscending
+        }
+    }
+
+    public func setBase(_ slug: String, base: String) throws -> Trama {
+        let t = try trama(slug)
+        guard !t.isArchived else { throw TramaError("essa trama está arquivada") }
+        let name = base.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty else { throw TramaError("escolha uma branch de base") }
+        guard name != t.branch else { throw TramaError("“\(name)” é a branch desta trama") }
+        for r in mergeOrdered(t.repos) {
+            guard Git.ensureRemoteBranch(r.path, name) || Git.branchExists(r.path, name) else {
+                throw TramaError("\(r.name): a base “\(name)” não existe")
+            }
+        }
+        let updated = try updateTrama(slug) { $0.base = name }
+        try? addJournal(slug, "base trocada para \(name)")
+        return updated
+    }
+}
