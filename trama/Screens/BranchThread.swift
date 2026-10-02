@@ -53,6 +53,11 @@ enum ThreadLayout: String, CaseIterable {
 struct BranchThread: View {
     let overview: GitOverview
     let status: RepoStatus
+    let repo: String
+    let worktree: String
+    let compare: String?
+    let onCompare: (String?) -> Void
+    @State private var picking = false
 
     @AppStorage(ThreadLayout.storageKey) private var layoutName = ThreadLayout.horizontal.rawValue
     @State private var drawn = false
@@ -66,7 +71,7 @@ struct BranchThread: View {
     var layout: ThreadLayout { ThreadLayout(rawValue: layoutName) ?? .horizontal }
 
     var key: String {
-        "\(layout.rawValue)-\(overview.head?.hash ?? "")-\(overview.aheadCount)-\(overview.behindCount)-\(overview.changes.isEmpty)"
+        "\(layout.rawValue)-\(overview.head?.hash ?? "")-\(overview.baseLabel)-\(overview.aheadCount)-\(overview.behindCount)-\(overview.changes.isEmpty)"
     }
 
     var behindShown: [Commit] { Array(overview.behind.prefix(2).reversed()) }
@@ -105,6 +110,19 @@ struct BranchThread: View {
                     Text("O fio desta branch")
                         .font(.system(size: 12.5, weight: .semibold))
                     Spacer()
+                    Button {
+                        picking = true
+                    } label: {
+                        Label(compare == nil ? "Comparar" : "vs \(overview.baseLabel)", systemImage: "arrow.left.arrow.right")
+                            .font(.system(size: 11.5))
+                            .lineLimit(1)
+                    }
+                    .buttonStyle(GhostButton(compact: true))
+                    .help("Escolher qualquer branch para comparar com o fio")
+                    if compare != nil {
+                        Button("Base padrão") { onCompare(nil) }
+                            .buttonStyle(GhostButton(compact: true))
+                    }
                     if layout == .horizontal {
                         Text("cada ponto é um commit")
                             .font(.system(size: 11.5))
@@ -132,6 +150,9 @@ struct BranchThread: View {
                 .id(key)
             }
         }
+        .sheet(isPresented: $picking) {
+            BranchPickerSheet(repo: repo, worktree: worktree, into: overview.branch, title: "Comparar \(overview.branch) com…") { onCompare($0) }
+        }
         .frame(minWidth: layout == .horizontal ? 380 : 300)
         .layoutPriority(1)
     }
@@ -143,7 +164,7 @@ struct BranchThread: View {
             let bottomLast = hasAhead ? bottomX(aheadShown.count - 1) : forkX
             let dirtyX = (hasAhead ? bottomLast : forkX) + step
             ZStack(alignment: .topLeading) {
-                lane(label: "origin/\(overview.base)", y: topY)
+                lane(label: overview.baseLabel, y: topY)
                 lane(label: "trama", y: bottomY, ember: true)
 
                 Path { p in
@@ -359,7 +380,7 @@ struct BranchThreadColumn: View {
 
     var legend: some View {
         VStack(alignment: .leading, spacing: 6) {
-            legendLine(color: Theme.thread, name: "origin/\(overview.base)", note: overview.behindCount > 0 ? "↓\(overview.behindCount) andou" : nil, tone: Theme.waitText)
+            legendLine(color: Theme.thread, name: overview.baseLabel, note: overview.behindCount > 0 ? "↓\(overview.behindCount) andou" : nil, tone: Theme.waitText)
             legendLine(color: Theme.ember, name: "trama", note: overview.aheadCount > 0 ? "↑\(overview.aheadCount) à frente" : nil, tone: Theme.emberLight)
         }
         .padding(.leading, 14)

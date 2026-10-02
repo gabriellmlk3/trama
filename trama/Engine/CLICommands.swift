@@ -52,6 +52,7 @@ extension CLI {
         "hook": Command(summary: "recebe eventos do Claude Code (uso interno)", usage: "trama hook < evento.json", valueFlags: [], run: cmdHook),
         "hooks": Command(summary: "instala ou remove os hooks no Claude Code", usage: "trama hooks instalar|remover|status [--settings caminho]", valueFlags: ["settings"], run: cmdHooks),
         "ferramentas": Command(summary: "mostra ou instala as CLIs dos provedores (gh, glab, az)", usage: "trama ferramentas [instalar [gh|glab|az|todas]] [--json]", valueFlags: [], run: cmdTools),
+        "skill": Command(summary: "instala ou remove a skill que ensina agentes do Claude Code a usar o Trama", usage: "trama skill instalar|remover|status", valueFlags: [], run: cmdSkill),
         "versao": Command(summary: "mostra a versão", usage: "trama versao", valueFlags: [], run: { c, _ in c.line("trama \(CLI.version)") }),
     ]
 
@@ -727,6 +728,24 @@ extension CLI {
             }
         default:
             throw TramaError("use: trama hooks instalar|remover|status")
+        }
+    }
+
+    static func cmdSkill(_ c: Context, _ a: Arguments) throws {
+        switch a.positional(0) ?? "status" {
+        case "instalar", "install":
+            try AgentSkill.install(executable: Workspace.currentExecutable())
+            c.ok("skill do Trama instalada em \(Paths.abbreviate(AgentSkill.path()))")
+            c.line("  Sessões novas do Claude Code, em qualquer pasta, passam a saber criar e gerenciar tramas.")
+        case "remover", "uninstall":
+            let removed = try AgentSkill.remove()
+            c.ok(removed ? "skill do Trama removida" : "a skill do Trama não estava instalada")
+        case "status":
+            let on = AgentSkill.isInstalled()
+            if c.json { return try c.emitJSON(["instalada": on]) }
+            c.line("\(on ? "✓" : "✗") skill do Trama (\(Paths.abbreviate(AgentSkill.path())))")
+        default:
+            throw TramaError("use: trama skill instalar|remover|status")
         }
     }
 }

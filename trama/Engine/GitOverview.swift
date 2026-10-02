@@ -32,6 +32,7 @@ public struct GitOverview: Sendable {
     public var branch: String
     public var head: Commit?
     public var base: String
+    public var baseLabel: String
     public var baseTip: Commit?
     public var mergeBase: Commit?
     public var changes: [FileChange]
@@ -172,13 +173,14 @@ extension Git {
 }
 
 extension Workspace {
-    public func gitOverview(_ slug: String, repo name: String) throws -> GitOverview {
+    public func gitOverview(_ slug: String, repo name: String, compare: String? = nil) throws -> GitOverview {
         let t = try trama(slug)
         let r = try repo(name)
         let wt = worktreePath(slug, r.name)
         guard Paths.isDirectory(wt) else { throw TramaError("worktree não encontrado em \(Paths.abbreviate(wt))") }
         let base = base(for: t, r)
-        let ref = Git.baseRef(wt, base)
+        let compare = compare.flatMap { Git.refExists(wt, $0) ? $0 : nil }
+        let ref = compare ?? Git.baseRef(wt, base)
         let branch = Git.currentBranchName(wt)
         let ab = (try? Git.aheadBehind(wt, ref)) ?? (ahead: 0, behind: 0)
         let mergeBaseHash = (try? Git.run(wt, "merge-base", ref, "HEAD")) ?? ""
@@ -187,7 +189,8 @@ extension Workspace {
         return GitOverview(
             branch: branch,
             head: Git.lastCommit(wt),
-            base: base,
+            base: compare ?? base,
+            baseLabel: ref,
             baseTip: Git.commit(wt, ref),
             mergeBase: mergeBaseHash.isEmpty ? nil : Git.commit(wt, mergeBaseHash),
             changes: Git.fileChanges(wt),

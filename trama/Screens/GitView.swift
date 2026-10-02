@@ -89,6 +89,7 @@ private struct LoadKey: Equatable {
     var repo: String
     var stamp: Int64
     var token: Int
+    var compare: String?
 }
 
 private struct DiffKey: Equatable {
@@ -105,6 +106,7 @@ struct GitView: View {
 
     @AppStorage("repoListVisible") private var repoListVisible = true
     @State private var selectedRepo: String?
+    @State private var compares: [String: String] = [:]
     @State private var overview: GitOverview?
     @State private var overviewRepo: String?
     @State private var loadError: String?
@@ -166,7 +168,7 @@ struct GitView: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         }
-        .task(id: LoadKey(slug: trama.slug, repo: currentRepo ?? "", stamp: model.state?.generatedAt ?? 0, token: refreshToken)) {
+        .task(id: LoadKey(slug: trama.slug, repo: currentRepo ?? "", stamp: model.state?.generatedAt ?? 0, token: refreshToken, compare: currentRepo.flatMap { compares[$0] })) {
             await load()
         }
         .task(id: DiffKey(file: selectedFile, loadedAt: overview?.loadedAt ?? 0, signature: changeSignature)) {
@@ -192,6 +194,8 @@ struct GitView: View {
                     repo: repo,
                     status: status,
                     overview: overviewRepo == name ? overview : nil,
+                    compare: compares[name],
+                    onCompare: { compares[name] = $0 },
                     error: loadError,
                     tab: $tab,
                     selectedFile: $selectedFile,
@@ -224,10 +228,11 @@ struct GitView: View {
     func load() async {
         guard let name = currentRepo else { return }
         let slug = trama.slug
+        let compare = compares[name]
         refreshing = true
         defer { refreshing = false }
         do {
-            let fresh = try await Core.run { try $0.gitOverview(slug, repo: name) }
+            let fresh = try await Core.run { try $0.gitOverview(slug, repo: name, compare: compare) }
             guard name == currentRepo else { return }
             withAnimation(.easeOut(duration: 0.25)) {
                 overview = fresh

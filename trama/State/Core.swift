@@ -64,15 +64,18 @@ enum Integration {
             throw TramaError("não encontrei o executável do app")
         }
         try Hooks.install(executable: exe)
+        try AgentSkill.install(executable: exe)
     }
 
     static func removeHooks() throws {
         try Hooks.remove()
+        try AgentSkill.remove()
     }
 
     static func sync() {
         guard let exe = embeddedCommand else { return }
         Hooks.repointIfNeeded(executable: exe)
+        AgentSkill.refreshIfInstalled(executable: exe)
         if let destination = linkDestination, destination != exe, destination.contains("Trama.app") {
             try? installCommand()
         }

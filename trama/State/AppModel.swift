@@ -507,6 +507,24 @@ final class AppModel: ObservableObject {
         }
     }
 
+    func mergeBranch(_ repo: String, ref: String, into target: String, label: String, allowConflicts: Bool = false) async {
+        busy = true
+        defer { busy = false }
+        do {
+            let result = try await Core.run { try $0.mergeBranch(repo: repo, ref: ref, into: target, allowConflicts: allowConflicts) }
+            await refresh()
+            if result.situation == "conflito" {
+                showNotice("\(ref) em \(label) com conflitos · resolva abaixo")
+            } else if result.situation == "mesclado" || result.situation == "atualizado" {
+                showNotice("\(ref) em \(label): \(result.detail ?? result.situation)")
+            } else {
+                showError("\(label): \(result.detail ?? result.situation)")
+            }
+        } catch {
+            showError(errorMessage(error))
+        }
+    }
+
     func concludeMerge(_ repo: String, worktree: String) async -> Bool {
         await perform(success: "Merge concluído em \(repo)") { _ = try $0.concludeMerge(repo: repo, worktree: worktree) }
     }

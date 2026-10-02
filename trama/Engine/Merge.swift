@@ -94,4 +94,35 @@ extension Workspace {
         }
         return result
     }
+
+    /// Branches locais e do remoto que podem entrar no worktree, sem repetir a branch atual.
+    public func mergeableBranches(repo key: String, worktree: String, fetch: Bool = true) throws -> [String] {
+        let r = try repo(key)
+        if fetch, Git.hasOrigin(worktree) {
+            _ = Git.execute(worktree, ["fetch", "--quiet", "--prune", "origin"], timeout: 60)
+        }
+        let current = Git.currentBranch(worktree)
+        let local = ((try? Git.run(r.path, "for-each-ref", "--format=%(refname:short)", "refs/heads")) ?? "")
+            .split(separator: "\n").map(String.init)
+        let remote = Git.remoteBranches(r.path).map { "origin/" + $0 }
+        return (local + remote).filter { $0 != current && $0 != "origin/" + current }
+    }
+
+    public func mergeBranch(repo key: String, ref: String, into target: String, allowConflicts: Bool = false) throws -> ResumeResult {
+        let r = try repo(key)
+        guard let to = Git.listWorktrees(r.path).first(where: { Paths.real($0.path) == Paths.real(target) && !$0.prunable }) else {
+            throw TramaError("não achei esse worktree em \(r.name)")
+        }
+        guard !to.branch.isEmpty else { throw TramaError("o worktree de destino está com HEAD solto") }
+        guard Git.refExists(to.path, ref) else { throw TramaError("“\(ref)” não existe em \(r.name)") }
+        if !allowConflicts, Git.predictedConflict(to.path, ref) == "conflito" {
+            throw TramaError("o merge de \(ref) em \(to.branch) teria conflito · nada foi mesclado")
+        }
+        let result = performMerge(repo: r.name, into: to.path, branch: ref, allowConflicts: allowConflicts)
+        if result.situation == "mesclado" || result.situation == "conflito",
+           let t = try? tramas().first(where: { !$0.isArchived && to.path.hasPrefix(tramaPath($0.slug) + "/") }) {
+            try? addJournal(t.slug, "trouxe \(ref) para \(to.branch) em \(r.name)")
+        }
+        return result
+    }
 }
