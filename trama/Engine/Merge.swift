@@ -122,6 +122,7 @@ extension Workspace {
         if result.situation == "mesclado" || result.situation == "conflito",
            let t = try? tramas().first(where: { !$0.isArchived && to.path.hasPrefix(tramaPath($0.slug) + "/") }) {
             try? addJournal(t.slug, "trouxe \(ref) para \(to.branch) em \(r.name)")
+
         }
         return result
     }

@@ -267,6 +267,11 @@ struct WorktreesCard: View {
     let trama: LiveTrama
     @State private var pending: (from: WorktreeSummary, into: WorktreeSummary)?
     @State private var resolvingIn: WorktreeSummary?
+    @State private var pending: (from: WorktreeSummary, into: WorktreeSummary)?
+    @State private var resolvingIn: WorktreeSummary?
+    @State private var pickingBranchFor: WorktreeSummary?
+    @State private var pickingBranch = false
+    @State private var pendingBranch: String?
     @State private var pickingBranch = false
     @State private var pendingBranch: String?
 
@@ -521,6 +526,9 @@ struct BranchPickerSheet: View {
             let list = (try? await Core.run { try $0.mergeableBranches(repo: repo, worktree: worktree) }) ?? []
             branches = list
             loading = false
+        }
+    }
+}
         }
     }
 }

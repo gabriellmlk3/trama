@@ -573,6 +573,18 @@ final class AppModel: ObservableObject {
                 showError("\(label): \(result.detail ?? result.situation)")
             }
         } catch {
+            showError(error.localizedDescription)
+        }
+    }
+
+    // Backwards-compatible wrapper for callers using the old `branch:` label
+    func mergeBranch(_ repo: String, branch: String, into target: String, label: String, allowConflicts: Bool = false) async {
+        await mergeBranch(repo, ref: branch, into: target, label: label, allowConflicts: allowConflicts)
+    }
+            } else {
+                showError("\(label): \(result.detail ?? result.situation)")
+            }
+        } catch {
             showError(errorMessage(error))
         }
     }
