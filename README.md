@@ -28,6 +28,7 @@ Para usar no dia a dia, copie o app para Aplicativos (Product ▸ Archive… ▸
 
 - **`CLAUDE.md` na pasta da trama.** O Claude Code carrega os `CLAUDE.md` das pastas acima de onde é aberto, então todo agente aberto em `~/Tramas/<trama>/<repo>` já sabe que está numa trama e como registrar o que faz.
 - **Hooks do Claude Code** (em `~/.claude/settings.json`, com cópia do original em `settings.json.antes-da-trama`): no início da sessão o agente recebe a cápsula e os handoffs endereçados ao repositório dele; durante a sessão o app mostra se ele está trabalhando, esperando aprovação ou terminou. Fora de uma trama os hooks não fazem nada.
+- **Skill `trama`** (em `~/.claude/skills/trama/SKILL.md`, instalada junto com os hooks ou por `trama skill instalar`): ensina qualquer agente, aberto em qualquer pasta, a criar, acompanhar, estacionar, arquivar e abrir PRs de tramas pelo comando `trama`, sem precisar estar dentro de uma.
 - **O comando `trama`.** É o próprio executável do app: chamado pelo link `~/.local/bin/trama` (ou como `Trama.app/Contents/MacOS/Trama <comando>`), ele roda a linha de comando e sai sem abrir janela.
 
 | Comando | Para quê |

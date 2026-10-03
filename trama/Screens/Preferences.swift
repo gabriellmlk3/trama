@@ -62,7 +62,7 @@ struct PreferencesView: View {
             } header: {
                 Text("Integração")
             } footer: {
-                Text("Os hooks entregam a cápsula a cada sessão aberta dentro de uma trama e mostram aqui o que cada agente está fazendo. Fora das tramas eles não fazem nada.")
+                Text("Os hooks entregam a cápsula a cada sessão aberta dentro de uma trama e mostram aqui o que cada agente está fazendo. Fora das tramas eles não fazem nada. Junto vai a skill “trama” em ~/.claude/skills, que ensina qualquer agente a criar e gerenciar tramas.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

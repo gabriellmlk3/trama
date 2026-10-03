@@ -559,16 +559,28 @@ final class AppModel: ObservableObject {
         }
     }
 
-    func mergeBranch(_ repo: String, branch: String, into target: String, label: String, allowConflicts: Bool = false) async {
+    func mergeBranch(_ repo: String, ref: String, into target: String, label: String, allowConflicts: Bool = false) async {
         busy = true
         defer { busy = false }
         do {
-            let result = try await Core.run { try $0.mergeBranch(repo: repo, branch: branch, into: target, allowConflicts: allowConflicts) }
+            let result = try await Core.run { try $0.mergeBranch(repo: repo, ref: ref, into: target, allowConflicts: allowConflicts) }
             await refresh()
             if result.situation == "conflito" {
-                showNotice("Merge em \(label) com conflitos · resolva abaixo")
+                showNotice("\(ref) em \(label) com conflitos · resolva abaixo")
             } else if result.situation == "mesclado" || result.situation == "atualizado" {
-                showNotice("Merge em \(label): \(result.detail ?? result.situation)")
+                showNotice("\(ref) em \(label): \(result.detail ?? result.situation)")
+            } else {
+                showError("\(label): \(result.detail ?? result.situation)")
+            }
+        } catch {
+            showError(error.localizedDescription)
+        }
+    }
+
+    // Backwards-compatible wrapper for callers using the old `branch:` label
+    func mergeBranch(_ repo: String, branch: String, into target: String, label: String, allowConflicts: Bool = false) async {
+        await mergeBranch(repo, ref: branch, into: target, label: label, allowConflicts: allowConflicts)
+    }
             } else {
                 showError("\(label): \(result.detail ?? result.situation)")
             }
