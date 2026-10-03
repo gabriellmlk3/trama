@@ -345,7 +345,8 @@ struct RepoList: View {
                         .foregroundStyle(Theme.faded)
                         .fixedSize(horizontal: false, vertical: true)
                 }
-                .padding(.top, 14)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 14)
                 .overlay(alignment: .top) { Rectangle().fill(Theme.line).frame(height: 1) }
             }
         }

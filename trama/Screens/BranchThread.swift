@@ -363,9 +363,10 @@ struct BranchThreadColumn: View {
 
     @State private var drawn = false
 
-    private let baseX: CGFloat = 24
+    private var headOnly: Bool { !hasAhead && !hasDirty && behindShown.isEmpty }
+    private var baseX: CGFloat { headOnly ? 40 : 24 }
     private let tramaX: CGFloat = 60
-    private let textX: CGFloat = 92
+    private var textX: CGFloat { headOnly ? 72 : 92 }
     private let headerHeight: CGFloat = 58
     private let rowHeight: CGFloat = 36
 

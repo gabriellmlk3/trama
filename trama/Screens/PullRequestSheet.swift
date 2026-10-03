@@ -34,6 +34,8 @@ final class PullRequestPlanner: ObservableObject {
     @Published private(set) var refreshedAt: Date?
     @Published private(set) var refreshFailures: [String] = []
     @Published private(set) var failure: String?
+    @Published private(set) var creatingBranches: Set<String> = []
+    @Published private(set) var creationFailure: String?
     @Published var draft = false
     @Published var mode = Mode.pullRequest
 
@@ -134,9 +136,8 @@ final class PullRequestPlanner: ObservableObject {
 
     func createBranch(_ name: String, from source: String, scope: String?) async -> String? {
         let slug = self.slug
-        var repos = reposFor(source, scope: scope)
         let taken = Set(options.first(where: { $0.name == name })?.repos ?? [])
-        repos.removeAll { taken.contains($0) }
+        let repos = reposFor(source, scope: scope).filter { !taken.contains($0) }
         do {
             try await Core.run { try $0.createRemoteBranch(slug, name: name, from: source, repos: repos) }
         } catch {
@@ -145,6 +146,42 @@ final class PullRequestPlanner: ObservableObject {
         await refresh()
         if let scope { choose(name, for: scope) } else { chooseForAll(name) }
         return nil
+    }
+
+    var missingByBranch: [String: [String]] {
+        var out: [String: [String]] = [:]
+        for row in rows {
+            if let wanted = missing[row.repo] ?? (row.blocker == .missingTarget ? row.target : nil) {
+                out[wanted, default: []].append(row.repo)
+            }
+        }
+        return out
+    }
+
+    var missingCount: Int { missingByBranch.values.reduce(0) { $0 + $1.count } }
+
+    func createMissing(_ name: String, repos: [String]) async {
+        guard !repos.isEmpty, creatingBranches.isDisjoint(with: repos) else { return }
+        creatingBranches.formUnion(repos)
+        creationFailure = nil
+        defer { creatingBranches.subtract(repos) }
+        let slug = self.slug
+        let fallback = originLabel
+        let groups = Dictionary(grouping: repos, by: { defaults[$0] ?? fallback })
+        do {
+            for (source, group) in groups {
+                try await Core.run { try $0.createRemoteBranch(slug, name: name, from: source, repos: group) }
+            }
+        } catch {
+            creationFailure = errorMessage(error)
+        }
+        await refresh()
+        let covered = Set(options.first(where: { $0.name == name })?.repos ?? [])
+        for repo in repos where covered.contains(repo) {
+            targets[repo] = name
+            missing[repo] = nil
+        }
+        replan()
     }
 
     func renameBranch(_ old: String, to new: String, scope: String?) async -> String? {
@@ -361,6 +398,33 @@ struct PullRequestSheet: View {
                 }
             if let all = planner.shownForAll {
                 Chip(text: "existe em \(planner.coverage(of: all)) de \(planner.repoCount) \(plural(planner.repoCount, "repo", "repos"))")
+            }
+            if planner.missingCount > 0 {
+                Button {
+                    Task {
+                        for (name, repos) in planner.missingByBranch {
+                            await planner.createMissing(name, repos: repos)
+                        }
+                    }
+                } label: {
+                    HStack(spacing: 6) {
+                        if !planner.creatingBranches.isEmpty {
+                            ProgressView().controlSize(.mini)
+                        } else {
+                            Image(systemName: "plus").font(.system(size: 10, weight: .semibold))
+                        }
+                        Text("Criar nos \(planner.missingCount) \(plural(planner.missingCount, "repo", "repos")) sem a branch")
+                    }
+                }
+                .buttonStyle(GhostButton(compact: true))
+                .disabled(!planner.creatingBranches.isEmpty)
+            }
+            if let failure = planner.creationFailure {
+                Text(failure)
+                    .font(.system(size: 11.5))
+                    .foregroundStyle(Theme.waitText)
+                    .lineLimit(1)
+                    .help(failure)
             }
             Spacer()
             HStack(spacing: 6) {
@@ -662,6 +726,20 @@ private struct PullRequestRowView: View {
                     Text("\(wanted) não existe neste repo")
                         .font(.system(size: 11.5))
                         .foregroundStyle(Theme.waitText)
+                    Button {
+                        Task { await planner.createMissing(wanted, repos: [row.repo]) }
+                    } label: {
+                        HStack(spacing: 6) {
+                            if planner.creatingBranches.contains(row.repo) {
+                                ProgressView().controlSize(.mini)
+                            } else {
+                                Image(systemName: "plus").font(.system(size: 10, weight: .semibold))
+                            }
+                            Text("Criar neste repo")
+                        }
+                    }
+                    .buttonStyle(GhostButton(compact: true))
+                    .disabled(planner.creatingBranches.contains(row.repo))
                 }
             }
             .frame(width: Column.target, alignment: .leading)

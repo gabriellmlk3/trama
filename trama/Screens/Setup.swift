@@ -44,27 +44,33 @@ struct SetupView: View {
 
             Step(number: 2, title: "Repositórios das tramas", detail: "Os repositórios que podem entrar em tramas. Dá para escolher vários de uma vez.") {
                 VStack(alignment: .leading, spacing: 8) {
-                    ForEach(repos, id: \.self) { r in
-                        HStack {
-                            Text(URL(fileURLWithPath: r).lastPathComponent)
-                                .font(Theme.mono(12.5))
-                            Text(Paths.abbreviate(r))
-                                .font(Theme.mono(11))
-                                .foregroundStyle(Theme.faded)
-                                .lineLimit(1)
-                                .truncationMode(.middle)
-                            Spacer()
-                            Button {
-                                repos.removeAll { $0 == r }
-                            } label: {
-                                Image(systemName: "xmark")
-                                    .font(.system(size: 10))
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 8) {
+                            ForEach(repos, id: \.self) { r in
+                                HStack {
+                                    Text(URL(fileURLWithPath: r).lastPathComponent)
+                                        .font(Theme.mono(12.5))
+                                    Text(Paths.abbreviate(r))
+                                        .font(Theme.mono(11))
+                                        .foregroundStyle(Theme.faded)
+                                        .lineLimit(1)
+                                        .truncationMode(.middle)
+                                    Spacer()
+                                    Button {
+                                        repos.removeAll { $0 == r }
+                                    } label: {
+                                        Image(systemName: "xmark")
+                                            .font(.system(size: 10))
+                                    }
+                                    .buttonStyle(.plain)
+                                    .foregroundStyle(Theme.faded)
+                                    .accessibilityLabel("Remover \(r)")
+                                }
                             }
-                            .buttonStyle(.plain)
-                            .foregroundStyle(Theme.faded)
-                            .accessibilityLabel("Remover \(r)")
                         }
                     }
+                    .frame(maxHeight: 220)
+                    .fixedSize(horizontal: false, vertical: repos.count <= 7)
                     Button("Adicionar repositórios…") {
                         for p in Terminal.choosePaths(multiple: true, title: "Escolha os repositórios") where !repos.contains(p) && p != context {
                             repos.append(p)

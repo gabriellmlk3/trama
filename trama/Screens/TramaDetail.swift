@@ -216,22 +216,28 @@ enum CellType {
 struct LoomView: View {
     @EnvironmentObject var model: AppModel
     let selected: LiveTrama
+    @AppStorage("loomOnlyInside") private var onlyInside = false
+    @State private var sweep = 1.0
 
     var body: some View {
         let columns = model.visibleTramas
+        let hasContext = !(model.state?.context ?? "").isEmpty
         VStack(spacing: 0) {
-            LoomHeader(columns: columns, selected: selected)
-            let hasContext = !(model.state?.context ?? "").isEmpty
-            let count = model.repos.count
+            LoomHeader(columns: columns, selected: selected, onlyInside: $onlyInside)
+            let repos = onlyInside ? model.repos.filter { selected.repos.contains($0.name) } : model.repos
             ScrollView {
-                VStack(spacing: 0) {
-                    ForEach(Array(model.repos.enumerated()), id: \.element.id) { index, repo in
-                        LoomRow(repo: repo, columns: columns, selected: selected, rank: count - 1 - index + (hasContext ? 1 : 0))
+                LazyVStack(spacing: 0) {
+                    ForEach(Array(repos.enumerated()), id: \.element.id) { index, repo in
+                        LoomRow(repo: repo, columns: columns, selected: selected, rank: index, total: repos.count + (hasContext ? 1 : 0), sweep: sweep)
                     }
                     if let context = model.state?.context, !context.isEmpty {
-                        ContextRow(context: context, columns: columns, selected: selected)
+                        ContextRow(context: context, columns: columns, selected: selected, rank: repos.count, total: repos.count + 1, sweep: sweep)
                     }
                 }
+            }
+            .onChange(of: selected.slug) { _ in
+                sweep = 0
+                withAnimation(.linear(duration: min(0.9, 0.06 * Double(repos.count + 1)))) { sweep = 1 }
             }
             .scrollIndicators(.automatic)
         }
@@ -245,6 +251,7 @@ struct LoomHeader: View {
     @EnvironmentObject var model: AppModel
     let columns: [LiveTrama]
     let selected: LiveTrama
+    @Binding var onlyInside: Bool
 
     func abbreviate(_ t: LiveTrama) -> String {
         t.slug.count <= 6 ? t.slug : String(t.slug.prefix(5)) + "."
@@ -272,6 +279,23 @@ struct LoomHeader: View {
             SectionLabel(text: "Nesta trama")
                 .padding(.leading, 4)
             Spacer()
+            Button {
+                onlyInside.toggle()
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: onlyInside ? "line.3.horizontal.decrease.circle.fill" : "line.3.horizontal.decrease.circle")
+                    Text(onlyInside ? "Só na trama" : "Todos os repos")
+                }
+                .font(.system(size: 11.5))
+                .foregroundStyle(onlyInside ? Theme.emberText : Theme.faded)
+                .padding(.horizontal, 10)
+                .frame(height: 26)
+                .overlay(Capsule().stroke(onlyInside ? Theme.ember.opacity(0.45) : Theme.line2, lineWidth: 1))
+                .contentShape(Capsule())
+            }
+            .buttonStyle(.plain)
+            .padding(.trailing, 14)
+            .help(onlyInside ? "Mostrar todos os repositórios" : "Mostrar só os repositórios desta trama")
         }
         .frame(height: 44)
         .overlay(alignment: .bottom) {
@@ -286,6 +310,8 @@ struct LoomRow: View {
     let columns: [LiveTrama]
     let selected: LiveTrama
     let rank: Int
+    var total = 1
+    var sweep = 1.0
 
     var inside: Bool { selected.repos.contains(repo.name) }
 
@@ -310,6 +336,8 @@ struct LoomRow: View {
                     selected: t.slug == selected.slug,
                     parked: t.isParked,
                     rank: rank,
+                    total: total,
+                    sweep: sweep,
                     agent: t.status(for: repo.name)?.primaryAgent
                 )
             }
@@ -329,17 +357,19 @@ struct LoomCell: View {
     let selected: Bool
     let parked: Bool
     var rank = 0
+    var total = 1
+    var sweep = 1.0
     var agent: Agent?
 
     private var climb: Animation {
         selected
-            ? .spring(response: 0.45, dampingFraction: 0.72).delay(Double(rank) * 0.1)
+            ? .spring(response: 0.25, dampingFraction: 0.8)
             : .easeOut(duration: 0.18)
     }
 
     var body: some View {
         ZStack {
-            VerticalThread(selected: selected, parked: parked)
+            VerticalThread(selected: selected, parked: parked, rank: rank, total: total, sweep: sweep)
             node
             if type == .inside, let agent, agent.isWorking || agent.isWaiting {
                 PulseRing(color: agent.isWaiting ? Theme.wait : Theme.iris, size: selected ? 14 : 10)
@@ -348,7 +378,6 @@ struct LoomCell: View {
         .frame(width: columnWidth)
         .frame(maxHeight: .infinity)
         .animation(climb, value: selected)
-        .animation(climb, value: type)
     }
 
     @ViewBuilder var node: some View {
@@ -374,7 +403,7 @@ struct LoomCell: View {
         case .outside:
             Rectangle()
                 .fill(Theme.loom)
-                .frame(width: selected ? 18 : 7, height: selected ? 30 : 22)
+                .frame(width: selected ? 38 : 22, height: selected ? 30 : 22)
         case .capsule:
             if selected {
                 RoundedRectangle(cornerRadius: 2)
@@ -413,9 +442,29 @@ struct PulseRing: View {
     }
 }
 
+struct ThreadFill: Shape {
+    var sweep: Double
+    let rank: Int
+    let total: Int
+
+    var animatableData: Double {
+        get { sweep }
+        set { sweep = newValue }
+    }
+
+    func path(in rect: CGRect) -> Path {
+        let count = Double(max(total, 1))
+        let local = min(max(sweep * count - Double(rank), 0), 1)
+        return Path(CGRect(x: rect.minX, y: rect.minY, width: rect.width, height: rect.height * local))
+    }
+}
+
 struct VerticalThread: View {
     let selected: Bool
     let parked: Bool
+    var rank = 0
+    var total = 1
+    var sweep = 1.0
 
     var body: some View {
         ZStack {
@@ -433,12 +482,12 @@ struct VerticalThread: View {
                     .fill(Theme.thread)
                     .frame(width: 1)
             }
-            Rectangle()
-                .fill(Theme.ember)
-                .frame(width: 2)
-                .shadow(color: Theme.ember.opacity(0.5), radius: 6)
-                .scaleEffect(y: selected ? 1 : 0, anchor: .bottom)
-                .opacity(selected ? 1 : 0)
+            if selected {
+                ThreadFill(sweep: sweep, rank: rank, total: total)
+                    .fill(Theme.ember)
+                    .frame(width: 2)
+                    .shadow(color: Theme.ember.opacity(0.5), radius: 6)
+            }
         }
     }
 }
@@ -782,6 +831,9 @@ struct ContextRow: View {
     let context: String
     let columns: [LiveTrama]
     let selected: LiveTrama
+    var rank = 0
+    var total = 1
+    var sweep = 1.0
 
     var summary: String {
         guard let c = model.capsule, c.trama == selected.slug, c.exists else {
@@ -816,7 +868,7 @@ struct ContextRow: View {
             .padding(.trailing, 8)
             .frame(width: nameWidth, alignment: .leading)
             ForEach(columns) { t in
-                LoomCell(type: .capsule, selected: t.slug == selected.slug, parked: t.isParked)
+                LoomCell(type: .capsule, selected: t.slug == selected.slug, parked: t.isParked, rank: rank, total: total, sweep: sweep)
             }
             HStack(spacing: 12) {
                 VStack(alignment: .leading, spacing: 6) {
