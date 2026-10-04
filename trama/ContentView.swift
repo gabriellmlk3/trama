@@ -30,6 +30,10 @@ struct ContentView: View {
             NewTramaView()
                 .environmentObject(model)
         }
+        .sheet(isPresented: $model.showingOnboarding) {
+            OnboardingView()
+                .environmentObject(model)
+        }
         .sheet(item: $model.resuming) { t in
             ResumeView(trama: t)
                 .environmentObject(model)

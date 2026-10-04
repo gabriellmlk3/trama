@@ -26,6 +26,7 @@ final class AppModel: ObservableObject {
     @Published var needsSetup = false
     @Published var busy = false
     @Published var showingNewTrama = false
+    @Published var showingOnboarding = false
     @Published var resuming: LiveTrama?
 
     let terminals = TerminalStore()
@@ -602,6 +603,9 @@ final class AppModel: ObservableObject {
             }
             await refresh()
             await refreshFindings()
+            if !UserDefaults.standard.bool(forKey: OnboardingPreference.seen) {
+                showingOnboarding = true
+            }
             return true
         } catch {
             showError(errorMessage(error))
