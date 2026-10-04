@@ -30,6 +30,8 @@ public enum AgentSkill {
         - Prefira `--json` quando for ler a saída. Os comandos nunca pedem interação.
         - Fora do worktree de uma trama, informe a trama: `--trama <slug>` ou como argumento posicional, conforme o `uso` de cada comando (`trama <comando> --ajuda` mostra).
         - Não apague worktrees nem branches à mão: use `estacionar`, `arquivar` e `soltar`. Os comandos destrutivos (`arquivar`, `soltar`, `limpar`) recusam trabalho não commitado; só passe `--forcar` se o usuário pedir.
+        - Se o usuário exigir aprovação para puxar repositórios (`trama repo puxada`), `trama puxar` e `trama repo add` feitos por você viram sugestão e esperam o aceite dele: não tente contornar.
+        - Percebeu que a mudança toca um repositório fora da trama? Puxe com o motivo ou sugira (`trama sugerir`) em vez de editar a cópia principal dele.
         - Não rode `trama pr` sem o usuário pedir: ele faz push e abre PRs. Use `--simular` antes para mostrar o plano.
 
         ## Criar
@@ -52,7 +54,9 @@ public enum AgentSkill {
 
         ## Alterar a trama
 
-        - `trama puxar <trama> <repo>...` / `trama soltar <trama> <repo>` · inclui ou tira repositórios
+        - `trama puxar <trama> <repo>... --motivo "por que"` / `trama soltar <trama> <repo>` · inclui ou tira repositórios
+        - `trama sugerir <repo|pasta> "motivo" --trama <slug>` · pede ao usuário para incluir outro repositório (cadastrado ou uma pasta git); ele aceita no app
+        - `trama repo descobrir` · repositórios git ao lado dos cadastrados que ainda não estão no Trama
         - `trama estacionar <trama>` / `trama retomar <trama> [--rebase]` · pausa e reativa; os worktrees ficam como estão
         - `trama arquivar <trama>` · remove os worktrees quando tudo foi mergeado; as branches ficam
         - `trama merge <origem> --para <destino>` · traz os commits de uma trama para outra

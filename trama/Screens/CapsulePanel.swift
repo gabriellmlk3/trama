@@ -19,6 +19,9 @@ struct CapsulePanel: View {
                         if c.exists {
                             GoalSection(capsule: c, trama: trama)
                             DecisionsSection(items: c.decisions)
+                            if !c.suggestions.isEmpty {
+                                SuggestionsSection(items: c.suggestions, trama: trama)
+                            }
                             HandoffsSection(items: c.handoffs, trama: trama)
                             PendingSection(items: c.pending, trama: trama)
                             JournalSection(items: c.journal)
@@ -225,6 +228,67 @@ struct AuthorChip: View {
             .padding(.horizontal, 7)
             .padding(.vertical, 1)
             .background(Capsule().fill(isAgent ? Theme.iris.opacity(0.12) : Theme.line))
+    }
+}
+
+struct SuggestionsSection: View {
+    @EnvironmentObject var model: AppModel
+    let items: [CapsuleItem]
+    let trama: LiveTrama
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            SectionLabel(text: "Repositórios sugeridos")
+            ForEach(Array(items.suffix(6).reversed())) { item in
+                VStack(alignment: .leading, spacing: 9) {
+                    HStack(spacing: 7) {
+                        Image(systemName: "plus.circle")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(Theme.iris)
+                        Text(item.to ?? "?")
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                    }
+                    .font(Theme.mono(11.5))
+                    .foregroundStyle(Theme.text3)
+                    Text(item.text)
+                        .font(.system(size: 13))
+                        .foregroundStyle(Theme.text2)
+                        .lineSpacing(2)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .textSelection(.enabled)
+                    HStack(spacing: 14) {
+                        Text([item.author, relativeTime(item.timestamp)].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · "))
+                            .foregroundStyle(Theme.faded)
+                        Spacer()
+                        if item.dismissed {
+                            Label("dispensada", systemImage: "xmark")
+                                .foregroundStyle(Theme.faded)
+                        } else if item.done {
+                            Label("incluído", systemImage: "checkmark")
+                                .foregroundStyle(Theme.okText)
+                        } else {
+                            Button("Dispensar") {
+                                Task { await model.dismissSuggestion(item.index, trama: trama.slug) }
+                            }
+                            .buttonStyle(.plain)
+                            .foregroundStyle(Theme.faded)
+                            Button("Incluir na trama") {
+                                Task { await model.acceptSuggestion(item.index, trama: trama.slug) }
+                            }
+                            .buttonStyle(.plain)
+                            .foregroundStyle(Theme.emberLight)
+                            .disabled(model.busy)
+                        }
+                    }
+                    .font(.system(size: 11.5))
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 13)
+                .background(RoundedRectangle(cornerRadius: 12).fill(Theme.surface))
+                .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color(hex: 0x262930), lineWidth: 1))
+            }
+        }
     }
 }
 

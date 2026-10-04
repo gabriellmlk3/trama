@@ -175,6 +175,9 @@ struct WhereYouLeftOff: View {
                     ForEach(c.openHandoffs.prefix(2)) { h in
                         Marker(text: "Handoff em aberto para \(h.to ?? "?"): \(h.text)", color: Theme.ember)
                     }
+                    ForEach(c.openSuggestions.prefix(2)) { item in
+                        Marker(text: "Agente sugere incluir \(item.to ?? "?"): \(item.text)", color: Theme.iris)
+                    }
                     let open = c.openPending
                     if !open.isEmpty {
                         Marker(

@@ -370,6 +370,21 @@ final class AppModel: ObservableObject {
         await loadCapsule(slug)
     }
 
+    func acceptSuggestion(_ n: Int, trama slug: String) async {
+        let ok = await perform { _ = try $0.acceptSuggestion(slug, number: n) }
+        if ok { showNotice("Repositório incluído na trama") }
+        await loadCapsule(slug)
+    }
+
+    func dismissSuggestion(_ n: Int, trama slug: String) async {
+        await perform { try $0.dismissSuggestion(slug, number: n) }
+        await loadCapsule(slug)
+    }
+
+    func setAgentPullPolicy(_ policy: AgentPullPolicy) async {
+        await perform(success: policy == .free ? "Agentes puxam repositórios sozinhos" : "Agentes só sugerem; você aprova a puxada") { try $0.setAgentPullPolicy(policy) }
+    }
+
     func setTramaContext(_ slug: String, _ path: String?) async {
         let ok = await perform(success: path == nil ? "Voltou ao contexto padrão" : "Repositório de contexto da trama atualizado") { _ = try $0.setTramaContext(slug, path) }
         if ok { await loadCapsule(slug) }

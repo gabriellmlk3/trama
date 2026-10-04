@@ -4,6 +4,7 @@ public enum CapsuleSection {
     public static let goal = "Objetivo"
     public static let decisions = "Decisões"
     public static let handoffs = "Handoffs"
+    public static let suggestions = "Sugestões"
     public static let pending = "Pendências"
     public static let journal = "Diário"
 }
@@ -16,6 +17,7 @@ public struct CapsuleItem: Codable, Hashable, Identifiable, Sendable {
     public var author: String?
     public var timestamp: Int64?
     public var done: Bool
+    public var dismissed = false
     public var from: String?
     public var to: String?
     public var raw: String
@@ -31,6 +33,7 @@ public struct TramaCapsule: Codable, Hashable, Sendable {
     public var goal = ""
     public var decisions: [CapsuleItem] = []
     public var handoffs: [CapsuleItem] = []
+    public var suggestions: [CapsuleItem] = []
     public var pending: [CapsuleItem] = []
     public var journal: [CapsuleItem] = []
     public var updatedAt: Int64?
@@ -38,11 +41,13 @@ public struct TramaCapsule: Codable, Hashable, Sendable {
 
     public var openPending: [CapsuleItem] { pending.filter { !$0.done } }
     public var openHandoffs: [CapsuleItem] { handoffs.filter { !$0.done } }
+    public var openSuggestions: [CapsuleItem] { suggestions.filter { !$0.done } }
 }
 
 private let reDated = regex(#"^- (\d{4}-\d{2}-\d{2} \d{2}:\d{2}) · (.+?): (.*)$"#)
 private let reJournal = regex(#"^- (\d{4}-\d{2}-\d{2} \d{2}:\d{2}) · (.*)$"#)
 private let reHandoff = regex(#"^- \[( |x|X)\] (\d{4}-\d{2}-\d{2} \d{2}:\d{2}) · (.+?) → (.+?) · (.+?): (.*)$"#)
+private let reSuggestion = regex(#"^- \[( |x|X|-)\] (\d{4}-\d{2}-\d{2} \d{2}:\d{2}) · (.+?) · (.+?): (.*)$"#)
 private let reCheckbox = regex(#"^- \[( |x|X)\] (.*)$"#)
 
 enum CapsuleDoc {
@@ -60,7 +65,7 @@ enum CapsuleDoc {
         } else {
             b += o + "\n"
         }
-        for s in [CapsuleSection.decisions, CapsuleSection.handoffs, CapsuleSection.pending, CapsuleSection.journal] {
+        for s in [CapsuleSection.decisions, CapsuleSection.handoffs, CapsuleSection.suggestions, CapsuleSection.pending, CapsuleSection.journal] {
             b += "\n## \(s)\n\n"
         }
         return b
@@ -152,6 +157,13 @@ enum CapsuleDoc {
                 it.to = m[4]
                 it.author = m[5]
                 it.text = m[6]
+            } else if name == CapsuleSection.suggestions, let m = matchGroups(reSuggestion, l) {
+                it.done = m[1] != " "
+                it.dismissed = m[1] == "-"
+                it.timestamp = Timestamp.unix(m[2])
+                it.to = m[3]
+                it.author = m[4]
+                it.text = m[5]
             } else if let m = matchGroups(reCheckbox, l) {
                 it.done = m[1] != " "
                 it.text = m[2]
@@ -181,6 +193,7 @@ enum CapsuleDoc {
         }
         c.decisions = items(lines, CapsuleSection.decisions)
         c.handoffs = items(lines, CapsuleSection.handoffs)
+        c.suggestions = items(lines, CapsuleSection.suggestions)
         c.pending = items(lines, CapsuleSection.pending)
         c.journal = items(lines, CapsuleSection.journal)
         c.markdown = doc

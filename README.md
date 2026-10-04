@@ -36,6 +36,9 @@ Para usar no dia a dia, copie o app para Aplicativos (Product ▸ Archive… ▸
 | `trama decisao "texto"` | Registra uma decisão que afeta a trama |
 | `trama handoff <repo> "texto"` | Passa trabalho para o agente de outro repositório |
 | `trama recebido` | Marca como lidos os handoffs para o seu repositório |
+| `trama sugerir <repo\|pasta> "motivo"` | Pede ao usuário para incluir outro repositório na trama; ele aceita na cápsula do app ou com `trama sugestao aceitar <n>` |
+| `trama repo descobrir` | Lista repositórios git ao lado dos cadastrados que ainda não estão no Trama |
+| `trama repo puxada livre\|aprovacao` | Define se agentes puxam repositórios sozinhos ou só sugerem (também em Preferências) |
 | `trama pendencia "texto"` / `trama feito <n>` | Pendências da trama |
 | `trama capsula` | Mostra a cápsula atual |
 | `trama status` | Situação de todos os repositórios da trama |

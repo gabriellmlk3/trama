@@ -75,22 +75,25 @@ private struct AppDialogView: View {
         Group {
             switch action.role {
             case .destructive:
-                Button(action.title, action: run)
-                    .buttonStyle(ToneButton(color: Theme.danger, text: Theme.dangerText))
+                Button(action: run) { label(action.title, fill: fill) }
+                    .buttonStyle(ToneButton(color: Theme.danger, text: Theme.dangerText, height: 32))
             case .cancel:
-                Button(action.title, action: run)
+                Button(action: run) { label(action.title, fill: fill) }
                     .buttonStyle(GhostButton())
                     .keyboardShortcut(.cancelAction)
             case .normal where primary:
-                Button(action.title, action: run)
+                Button(action: run) { label(action.title, fill: fill) }
                     .buttonStyle(EmberButton())
                     .keyboardShortcut(.defaultAction)
             case .normal:
-                Button(action.title, action: run)
+                Button(action: run) { label(action.title, fill: fill) }
                     .buttonStyle(GhostButton())
             }
         }
-        .frame(maxWidth: fill ? .infinity : nil)
+    }
+
+    private func label(_ title: String, fill: Bool) -> some View {
+        Text(title).frame(maxWidth: fill ? .infinity : nil)
     }
 }
 

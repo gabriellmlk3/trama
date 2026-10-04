@@ -1431,6 +1431,110 @@ final class CLITests: XCTestCase {
         XCTAssertTrue(r.output.contains(#""state" : "manual""#))
     }
 
+    func testRepoSuggestionsAndApprovalPolicy() throws {
+        let lab = try Lab()
+        defer {
+            lab.cleanup()
+            unsetenv("TRAMA_HOME")
+        }
+        let w = try lab.workspace()
+        let root = w.root
+
+        var r = run(["nova", "Selo", "--repos", "api,admin", "--sem-fetch"], in: lab.root, root: root)
+        XCTAssertEqual(r.code, 0, r.error)
+        let here = w.worktreePath("selo", "rebocs_api")
+
+        r = run(["repo", "descobrir", "--json"], in: lab.root, root: root)
+        let found = try JSONDecoder().decode([DiscoveredRepo].self, from: Data(r.output.utf8))
+        XCTAssertEqual(found.map(\.name), ["rebocs-context"])
+
+        r = run(["sugerir", "android", "exibir selo no app", "--trama", "selo"], in: here, root: root, agent: true)
+        XCTAssertEqual(r.code, 0, r.error)
+        r = run(["sugerir", "android", "de novo", "--trama", "selo"], in: here, root: root, agent: true)
+        XCTAssertEqual(r.code, 1)
+        XCTAssertTrue(r.error.contains("já foi sugerido"))
+        r = run(["sugerir", "admin", "já está", "--trama", "selo"], in: here, root: root, agent: true)
+        XCTAssertTrue(r.error.contains("já faz parte"))
+        r = run(["sugerir", "desconhecido", "x", "--trama", "selo"], in: here, root: root, agent: true)
+        XCTAssertTrue(r.error.contains("não conheço"))
+        r = run(["sugerir", found[0].path, "contexto compartilhado"], in: here, root: root, agent: true)
+        XCTAssertEqual(r.code, 0, r.error)
+
+        var capsule = try w.readCapsule("selo")
+        XCTAssertEqual(capsule.openSuggestions.map(\.to), ["rebocs-android", found[0].path])
+        XCTAssertEqual(capsule.suggestions[0].author, "agente · api")
+        XCTAssertEqual(capsule.suggestions[0].text, "exibir selo no app")
+
+        r = run(["sugestao", "aceitar", "1", "--trama", "selo", "--sem-fetch"], in: lab.root, root: root)
+        XCTAssertEqual(r.code, 0, r.error)
+        XCTAssertTrue(Paths.isDirectory(w.worktreePath("selo", "rebocs-android")))
+        XCTAssertTrue(try w.trama("selo").repos.contains("rebocs-android"))
+
+        r = run(["sugestao", "aceitar", "2", "--trama", "selo", "--sem-fetch"], in: lab.root, root: root)
+        XCTAssertEqual(r.code, 0, r.error)
+        let reloaded = try Workspace.open(root: root)
+        XCTAssertTrue(reloaded.config.repos.contains { $0.name == "rebocs-context" })
+        XCTAssertTrue(try reloaded.trama("selo").repos.contains("rebocs-context"))
+
+        capsule = try reloaded.readCapsule("selo")
+        XCTAssertTrue(capsule.openSuggestions.isEmpty)
+        XCTAssertTrue(capsule.suggestions.allSatisfy { $0.done && !$0.dismissed })
+        r = run(["sugestao", "aceitar", "1", "--trama", "selo"], in: lab.root, root: root)
+        XCTAssertTrue(r.error.contains("não há sugestão aberta"))
+    }
+
+    func testDismissedSuggestionStaysOutOfTheTrama() throws {
+        let lab = try Lab()
+        defer { lab.cleanup() }
+        let w = try lab.workspace()
+        let t = try w.newTrama(NewTramaOptions(title: "Selo", repos: ["api"], noFetch: true)).trama
+        let item = try w.suggestRepo(t.slug, target: "android", author: "agente", reason: "selo")
+        try w.dismissSuggestion(t.slug, number: item.index)
+        let capsule = try w.readCapsule(t.slug)
+        XCTAssertTrue(capsule.suggestions[0].dismissed)
+        XCTAssertTrue(capsule.openSuggestions.isEmpty)
+        XCTAssertEqual(try w.trama(t.slug).repos, ["rebocs_api"])
+        XCTAssertThrowsError(try w.acceptSuggestion(t.slug, number: item.index))
+    }
+
+    func testApprovalPolicyTurnsAgentPullsIntoSuggestions() throws {
+        let lab = try Lab()
+        defer {
+            lab.cleanup()
+            unsetenv("TRAMA_HOME")
+        }
+        let w = try lab.workspace()
+        let root = w.root
+        var r = run(["nova", "Selo", "--repos", "api", "--sem-fetch"], in: lab.root, root: root)
+        XCTAssertEqual(r.code, 0, r.error)
+        let here = w.worktreePath("selo", "rebocs_api")
+
+        r = run(["repo", "puxada"], in: lab.root, root: root)
+        XCTAssertTrue(r.output.hasPrefix("livre"))
+        r = run(["repo", "puxada", "aprovacao"], in: lab.root, root: root)
+        XCTAssertEqual(r.code, 0, r.error)
+        XCTAssertEqual(try Workspace.open(root: root).config.agentPullPolicy, .approval)
+
+        r = run(["puxar", "selo", "admin", "--motivo", "contrato novo"], in: here, root: root, agent: true)
+        XCTAssertEqual(r.code, 0, r.error)
+        XCTAssertTrue(r.output.contains("espera o aceite"))
+        XCTAssertEqual(try w.trama("selo").repos, ["rebocs_api"])
+        XCTAssertEqual(try w.readCapsule("selo").openSuggestions.first?.text, "contrato novo")
+
+        r = run(["repo", "add", lab.root + "/github/rebocs-context"], in: here, root: root, agent: true)
+        XCTAssertEqual(r.code, 1)
+        XCTAssertTrue(r.error.contains("exige aprovação"))
+
+        r = run(["puxar", "selo", "android", "--sem-fetch"], in: lab.root, root: root)
+        XCTAssertEqual(r.code, 0, r.error)
+        XCTAssertTrue(try w.trama("selo").repos.contains("rebocs-android"))
+
+        r = run(["repo", "puxada", "livre"], in: lab.root, root: root)
+        r = run(["puxar", "selo", "admin", "--sem-fetch"], in: here, root: root, agent: true)
+        XCTAssertEqual(r.code, 0, r.error)
+        XCTAssertTrue(try w.trama("selo").repos.contains("rebocs-admin"))
+    }
+
     func testAgentFlow() throws {
         let lab = try Lab()
         defer {

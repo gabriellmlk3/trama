@@ -7,6 +7,7 @@ struct PreferencesView: View {
     @State private var commandOn = Integration.isCommandInstalled()
     @State private var localError: String?
     @State private var defaultBranch = ""
+    @State private var pullPolicy = AgentPullPolicy.free
     @AppStorage(ClaudeTarget.storageKey) private var claudeTarget = ClaudeTarget.cli.rawValue
     @AppStorage(AgentScope.storageKey) private var agentScope = AgentScope.single.rawValue
     @State private var editingRecipe: RepoConfig?
@@ -215,6 +216,21 @@ struct PreferencesView: View {
                     .foregroundStyle(.secondary)
             }
 
+            Section {
+                Picker("Agentes puxam repositórios", selection: $pullPolicy) {
+                    Text("Sozinhos").tag(AgentPullPolicy.free)
+                    Text("Só com a minha aprovação").tag(AgentPullPolicy.approval)
+                }
+                .onChange(of: pullPolicy) { _, new in
+                    guard (try? Workspace.open())?.config.agentPullPolicy != new else { return }
+                    Task { await model.setAgentPullPolicy(new) }
+                }
+            } footer: {
+                Text("Quando um agente precisa de outro repositório, ele puxa para a trama ou sugere. Com aprovação, `trama puxar` e `trama repo add` feitos por um agente viram uma sugestão na cápsula, e você decide ali.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
             Section("Repositórios") {
                 ForEach(model.repos) { r in
                     LabeledContent {
@@ -258,6 +274,7 @@ struct PreferencesView: View {
         defaultBranch = model.state?.repos.first?.base ?? "main"
         if let w = try? Workspace.open() {
             defaultBranch = w.config.defaultBranch
+            pullPolicy = w.config.agentPullPolicy
         }
     }
 

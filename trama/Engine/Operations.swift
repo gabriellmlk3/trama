@@ -224,6 +224,7 @@ extension Workspace {
         b += "Use o comando `trama` (em `\(executable)`) a partir da pasta do seu repositório:\n\n"
         b += "- `trama decisao \"texto\"` · decisão que afeta a trama ou outros repositórios\n"
         b += "- `trama handoff <repositório> \"texto\"` · passa trabalho para o agente de outro repositório\n"
+        b += "- `trama sugerir <repositório|pasta> \"motivo\"` · pede ao usuário para incluir outro repositório na trama\n"
         b += "- `trama recebido` · marca como lidos os handoffs endereçados ao seu repositório\n"
         b += "- `trama pendencia \"texto\"` e `trama feito <n>` · pendências da trama\n"
         b += "- `trama status` · situação de todos os repositórios da trama\n\n"

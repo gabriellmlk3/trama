@@ -188,7 +188,7 @@ struct TramaHeader: View {
                 }
             }
         }
-        .padding(.horizontal, 28)
+        .padding(.horizontal, 28) 
         .padding(.top, 26)
         .padding(.bottom, 18)
         .appDialog(
@@ -243,14 +243,21 @@ struct LoomView: View {
         VStack(spacing: 0) {
             LoomHeader(columns: columns, selected: selected, onlyInside: $onlyInside)
             let repos = onlyInside ? model.repos.filter { selected.repos.contains($0.name) } : model.repos
-            ScrollView {
-                LazyVStack(spacing: 0) {
-                    ForEach(Array(repos.enumerated()), id: \.element.id) { index, repo in
-                        LoomRow(repo: repo, columns: columns, selected: selected, rank: index, total: repos.count + (hasContext ? 1 : 0), sweep: sweep)
+            GeometryReader { viewport in
+                ScrollView {
+                    VStack(spacing: 0) {
+                        LazyVStack(spacing: 0) {
+                            ForEach(Array(repos.enumerated()), id: \.element.id) { index, repo in
+                                LoomRow(repo: repo, columns: columns, selected: selected, rank: index, total: repos.count + (hasContext ? 1 : 0), sweep: sweep)
+                            }
+                            if let context = model.state?.context, !context.isEmpty {
+                                ContextRow(context: context, columns: columns, selected: selected, rank: repos.count, total: repos.count + 1, sweep: sweep)
+                            }
+                        }
+                        LoomTail(columns: columns, selected: selected)
+                            .frame(maxHeight: .infinity)
                     }
-                    if let context = model.state?.context, !context.isEmpty {
-                        ContextRow(context: context, columns: columns, selected: selected, rank: repos.count, total: repos.count + 1, sweep: sweep)
-                    }
+                    .frame(minHeight: viewport.size.height)
                 }
             }
             .onChange(of: selected.slug) { _ in
@@ -262,6 +269,31 @@ struct LoomView: View {
         .background(Theme.loom)
         .clipShape(RoundedRectangle(cornerRadius: 14))
         .overlay(RoundedRectangle(cornerRadius: 14).stroke(Theme.line, lineWidth: 1))
+    }
+}
+
+struct LoomTail: View {
+    let columns: [LiveTrama]
+    let selected: LiveTrama
+    var fadesIn = false
+
+    var body: some View {
+        HStack(spacing: 0) {
+            Color.clear.frame(width: nameWidth)
+            ForEach(columns) { t in
+                VerticalThread(selected: t.slug == selected.slug, parked: t.isParked)
+                    .frame(width: columnWidth)
+            }
+            Spacer(minLength: 0)
+        }
+        .mask(
+            LinearGradient(stops: [
+                .init(color: fadesIn ? .black.opacity(0) : .black, location: 0),
+                .init(color: fadesIn ? .black : .black.opacity(0), location: 1)
+            ], startPoint: .top, endPoint: .bottom)
+        )
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
     }
 }
 
@@ -288,6 +320,8 @@ struct LoomHeader: View {
                     Text(abbreviate(t))
                         .font(Theme.mono(10.5, weight: current ? .medium : .regular))
                         .foregroundStyle(current ? Theme.emberLight : Theme.faded)
+                        .padding(.vertical, 5)
+                        .background(Theme.loom)
                         .frame(width: columnWidth, height: 44)
                         .contentShape(Rectangle())
                 }
@@ -316,6 +350,7 @@ struct LoomHeader: View {
             .help(onlyInside ? "Mostrar todos os repositórios" : "Mostrar só os repositórios desta trama")
         }
         .frame(height: 44)
+        .background { LoomTail(columns: columns, selected: selected, fadesIn: true) }
         .overlay(alignment: .bottom) {
             Rectangle().fill(Theme.line).frame(height: 1)
         }
@@ -901,6 +936,8 @@ struct ContextRow: View {
         var parts = ["\(c.decisions.count) \(plural(c.decisions.count, "decisão", "decisões"))"]
         let open = c.openHandoffs.count
         if open > 0 { parts.append("\(open) \(plural(open, "handoff aberto", "handoffs abertos"))") }
+        let suggested = c.openSuggestions.count
+        if suggested > 0 { parts.append("\(suggested) \(plural(suggested, "repositório sugerido", "repositórios sugeridos"))") }
         if let at = c.updatedAt { parts.append("atualizada \(relativeTime(at))") }
         return parts.joined(separator: " · ")
     }
