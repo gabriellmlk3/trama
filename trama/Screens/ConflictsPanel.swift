@@ -117,6 +117,13 @@ struct ConflictsPanel: View {
                 Text(f.summary)
                     .font(.system(size: 11))
                     .foregroundStyle(Theme.faded)
+                if let hint = f.generatedHint {
+                    Text(hint)
+                        .font(.system(size: 10.5))
+                        .foregroundStyle(Theme.faded)
+                        .lineLimit(1)
+                        .help(hint)
+                }
             }
             Spacer(minLength: 8)
             Button("Aceitar minha") { accept(f, .ours) }
@@ -154,19 +161,33 @@ struct ConflictResolver: View {
     let onApplied: () -> Void
 
     @State private var document: ConflictDocument?
+    @State private var restored: [Int: ConflictResolution] = [:]
+    @State private var origins: [Int: ConflictOrigins] = [:]
     @State private var loadError: String?
 
     var body: some View {
         Group {
             if let document {
-                ConflictMergeView(document: document, file: file, oursName: oursName, theirsName: theirsName, busy: model.busy, onCancel: { dismiss() }) { content in
-                    Task {
-                        if await model.saveResolution(repo, worktree: worktree, file: file.path, content: content) {
-                            onApplied()
-                            dismiss()
+                ConflictMergeView(
+                    document: document,
+                    file: file,
+                    oursName: oursName,
+                    theirsName: theirsName,
+                    busy: model.busy,
+                    onCancel: { dismiss() },
+                    restored: restored,
+                    origins: origins,
+                    onDraft: { saveDraft(document, $0) },
+                    onSuggest: { hunk in try await suggest(document, hunk) },
+                    onApply: { content in
+                        Task {
+                            if await model.saveResolution(repo, worktree: worktree, file: file.path, content: content) {
+                                onApplied()
+                                dismiss()
+                            }
                         }
                     }
-                }
+                )
             } else if let loadError {
                 VStack(alignment: .leading, spacing: 14) {
                     Text(file.path).font(Theme.mono(13, weight: .medium))
@@ -187,10 +208,28 @@ struct ConflictResolver: View {
             let worktree = worktree
             let path = file.path
             do {
-                document = try await Core.run { try $0.conflictDocument(repo: repo, worktree: worktree, file: path) }
+                let loaded = try await Core.run { w -> (ConflictDocument, [Int: ConflictResolution]) in
+                    let doc = try w.conflictDocument(repo: repo, worktree: worktree, file: path)
+                    return (doc, w.loadConflictDraft(worktree: worktree, document: doc))
+                }
+                restored = loaded.1
+                document = loaded.0
+                origins = (try? await Core.run { try $0.conflictOrigins(repo: repo, worktree: worktree, file: path, document: loaded.0) }) ?? [:]
             } catch {
                 loadError = errorMessage(error)
             }
         }
+    }
+
+    func saveDraft(_ document: ConflictDocument, _ resolutions: [Int: ConflictResolution]) {
+        let worktree = worktree
+        Task { try? await Core.run { $0.saveConflictDraft(worktree: worktree, document: document, resolutions: resolutions) } }
+    }
+
+    func suggest(_ document: ConflictDocument, _ hunk: ConflictHunk) async throws -> [String] {
+        let repo = repo
+        let worktree = worktree
+        let path = file.path
+        return try await Core.run { try $0.suggestConflictResolution(repo: repo, worktree: worktree, file: path, document: document, hunk: hunk.id) }
     }
 }

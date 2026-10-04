@@ -89,7 +89,7 @@ public enum ConflictSegment: Identifiable, Hashable, Sendable {
 }
 
 public enum ConflictResolution: Hashable, Sendable {
-    case ours, theirs, both
+    case ours, theirs, both, bothReversed
     case custom([String])
 
     public func lines(for hunk: ConflictHunk) -> [String] {
@@ -97,6 +97,7 @@ public enum ConflictResolution: Hashable, Sendable {
         case .ours: return hunk.ours
         case .theirs: return hunk.theirs
         case .both: return hunk.ours + hunk.theirs
+        case .bothReversed: return hunk.theirs + hunk.ours
         case .custom(let lines): return lines
         }
     }
@@ -232,7 +233,7 @@ extension Git {
 }
 
 extension Workspace {
-    private func conflictWorktree(_ key: String, _ worktree: String) throws -> (repo: RepoConfig, path: String) {
+    func conflictWorktree(_ key: String, _ worktree: String) throws -> (repo: RepoConfig, path: String) {
         let r = try repo(key)
         guard let info = Git.listWorktrees(r.path).first(where: { !$0.bare && !$0.prunable && Paths.real($0.path) == Paths.real(worktree) }) else {
             throw TramaError("não achei esse worktree em \(r.name)")
@@ -259,7 +260,9 @@ extension Workspace {
         guard let text = try File.read(wt + "/" + file) else {
             throw TramaError("não consegui ler \(file) como texto · escolha a versão a manter")
         }
-        return try ConflictParser.parse(path: file, text: text)
+        let document = try ConflictParser.parse(path: file, text: text)
+        guard document.hunks.contains(where: { $0.base == nil }) else { return document }
+        return fillConflictBase(document, worktree: wt, file: file)
     }
 
     public func saveResolution(repo key: String, worktree: String, file: String, content: String) throws {
@@ -267,6 +270,7 @@ extension Workspace {
         _ = try conflictedFile(wt, file)
         try File.write(content, to: wt + "/" + file)
         try Git.run(wt, "add", "--", file)
+        clearConflictDraft(worktree: wt, file: file)
     }
 
     public func acceptSide(repo key: String, worktree: String, file: String, side: ConflictSide) throws {
