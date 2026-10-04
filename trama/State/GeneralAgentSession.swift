@@ -4,6 +4,8 @@ import Foundation
 final class GeneralAgentSession: ObservableObject {
     static let allowedTools = ["Read", "Grep", "Glob", "Bash(trama *)", "Bash(git status*)", "Bash(git diff*)", "Bash(git log*)"]
 
+    static let role = "Você é o agent geral do app Trama, aberto fora de qualquer trama. Use o comando `trama` (status, capsula, nova, decisao, handoff, pendencia) para ver e gerenciar todas as tramas; a skill `trama` descreve os comandos. Responda em português do Brasil, de forma curta."
+
     let path: String
     let extraDirs: [String]
     @Published private(set) var conversation = AgentConversation()
@@ -67,6 +69,7 @@ final class GeneralAgentSession: ObservableObject {
     private func arguments() -> [String] {
         var args = ["-p", "--output-format", "stream-json", "--verbose", "--include-partial-messages", "--permission-mode", "acceptEdits"]
         args += ["--allowedTools"] + Self.allowedTools
+        args += ["--append-system-prompt", Self.role]
         if let id = conversation.sessionID {
             args += ["--resume", id]
         } else if ClaudeSessions.hasHistory(at: path) {

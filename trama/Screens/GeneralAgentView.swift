@@ -1,17 +1,27 @@
 import SwiftUI
 
-struct GeneralAgentView: View {
+struct GeneralAgentView<Hero: View>: View {
     @ObservedObject var session: GeneralAgentSession
+    @ViewBuilder var hero: () -> Hero
     @State private var draft = ""
     @FocusState private var focused: Bool
 
     private var items: [AgentItem] { session.conversation.items }
 
     var body: some View {
-        VStack(spacing: 0) {
-            if items.isEmpty {
-                GeneralAgentEmpty()
-            } else {
+        if items.isEmpty {
+            VStack(spacing: 28) {
+                Spacer(minLength: 0)
+                hero()
+                inputBar
+                    .frame(maxWidth: 640)
+                Spacer(minLength: 0)
+                Spacer(minLength: 0)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .onAppear { focused = true }
+        } else {
+            VStack(spacing: 0) {
                 ScrollViewReader { proxy in
                     ScrollView {
                         LazyVStack(alignment: .leading, spacing: 14) {
@@ -24,6 +34,8 @@ struct GeneralAgentView: View {
                         }
                         .padding(.vertical, 16)
                         .padding(.trailing, 12)
+                        .frame(maxWidth: 820, alignment: .leading)
+                        .frame(maxWidth: .infinity)
                     }
                     .onChange(of: items.last) { _, _ in
                         withAnimation(.easeOut(duration: 0.15)) {
@@ -31,35 +43,22 @@ struct GeneralAgentView: View {
                         }
                     }
                 }
+                inputBar
+                    .frame(maxWidth: 820)
+                    .padding(.vertical, 14)
             }
-            AgentInputBar(draft: $draft, running: session.running, focused: $focused, onSend: send, onStop: { session.stop() }, onReset: items.isEmpty ? nil : { session.reset() })
-                .padding(.vertical, 14)
+            .onAppear { focused = true }
         }
-        .onAppear { focused = true }
+    }
+
+    private var inputBar: some View {
+        AgentInputBar(draft: $draft, running: session.running, focused: $focused, onSend: send, onStop: { session.stop() }, onReset: items.isEmpty ? nil : { session.reset() })
     }
 
     private func send() {
         let text = draft
         draft = ""
         session.send(text)
-    }
-}
-
-private struct GeneralAgentEmpty: View {
-    var body: some View {
-        VStack(spacing: 10) {
-            Image(systemName: "sparkles")
-                .font(.system(size: 22))
-                .foregroundStyle(Theme.ember)
-            Text("Converse com o agent geral")
-                .font(Theme.serif(26))
-            Text("Ele abre na raiz da trama, com acesso a todos os repositórios. Neste modo ele lê arquivos, edita e roda o comando trama. Para qualquer outra coisa, use “Abrir no Claude”.")
-                .font(.system(size: 12.5))
-                .foregroundStyle(Theme.faded)
-                .multilineTextAlignment(.center)
-                .frame(maxWidth: 440)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
 
@@ -88,7 +87,7 @@ private struct AgentInputBar: View {
 
     var body: some View {
         HStack(alignment: .bottom, spacing: 8) {
-            TextField("Peça algo ao agent da trama…", text: $draft, axis: .vertical)
+            TextField("Pergunte ou peça algo sobre suas tramas…", text: $draft, axis: .vertical)
                 .textFieldStyle(.plain)
                 .font(.system(size: 13.5))
                 .lineLimit(1...6)

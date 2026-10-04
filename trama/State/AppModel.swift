@@ -6,6 +6,7 @@ import SwiftUI
 @MainActor
 final class AppModel: ObservableObject {
     enum Screen: Hashable {
+        case home
         case trama(String)
         case findings
     }
@@ -28,7 +29,7 @@ final class AppModel: ObservableObject {
     @Published var resuming: LiveTrama?
 
     let terminals = TerminalStore()
-    private var generalAgents: [String: GeneralAgentSession] = [:]
+    private var homeAgentSession: GeneralAgentSession?
 
     private var loop: Task<Void, Never>?
     private var refreshing = false
@@ -80,9 +81,7 @@ final class AppModel: ObservableObject {
             state = new
             notifyTransitions(new)
             needsSetup = false
-            if screen == nil, let first = new.tramas.first(where: { $0.isActive }) ?? new.tramas.first {
-                screen = .trama(first.slug)
-            }
+            if screen == nil { screen = .home }
             if let t = selectedTrama {
                 await loadCapsule(t.slug)
             }
@@ -469,10 +468,11 @@ final class AppModel: ObservableObject {
         if ok { await refreshFindings() }
     }
 
-    func generalAgent(for t: LiveTrama) -> GeneralAgentSession {
-        if let existing = generalAgents[t.slug] { return existing }
-        let session = GeneralAgentSession(path: t.path, extraDirs: t.repos.map { worktreePath(t, $0) })
-        generalAgents[t.slug] = session
+    var homeAgent: GeneralAgentSession {
+        if let existing = homeAgentSession { return existing }
+        let root = state?.root ?? Workspace.defaultRoot()
+        let session = GeneralAgentSession(path: root, extraDirs: [state?.context].compactMap { $0 })
+        homeAgentSession = session
         return session
     }
 

@@ -46,6 +46,8 @@ struct DetailView: View {
 
     var body: some View {
         switch model.screen {
+        case .home?, nil:
+            HomeView()
         case .findings?:
             FindingsView()
         case .trama?:
@@ -54,13 +56,23 @@ struct DetailView: View {
             } else {
                 EmptyStateView()
             }
-        case nil:
-            EmptyStateView()
         }
     }
 }
 
-struct EmptyStateView: View {
+struct HomeView: View {
+    @EnvironmentObject var model: AppModel
+
+    var body: some View {
+        GeneralAgentView(session: model.homeAgent) {
+            HomeHero()
+        }
+        .padding(.horizontal, 28)
+        .padding(.bottom, 8)
+    }
+}
+
+struct HomeHero: View {
     @EnvironmentObject var model: AppModel
 
     var body: some View {
@@ -68,30 +80,38 @@ struct EmptyStateView: View {
             TramaLogo(size: 56)
             Text("Pare de trocar de branch.")
                 .font(Theme.serif(38))
-            Text("Crie uma trama: a mesma branch em vários repositórios, cada um no seu worktree, com uma cápsula de contexto que os agentes leem e escrevem.")
+            Text("Crie uma trama: a mesma branch em vários repositórios, cada um no seu worktree, com uma cápsula de contexto que os agentes leem e escrevem. Ou peça ao agent geral abaixo.")
                 .font(.system(size: 14))
                 .foregroundStyle(Theme.text3)
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: 520)
-            Button {
-                model.showingNewTrama = true
-            } label: {
-                HStack(spacing: 8) {
-                    Text("Tecer a primeira trama")
-                    KeyCap(text: "⌘N", dark: true)
+            HStack(spacing: 10) {
+                Button {
+                    model.showingNewTrama = true
+                } label: {
+                    HStack(spacing: 8) {
+                        Text(model.state?.tramas.isEmpty ?? true ? "Tecer a primeira trama" : "Tecer nova trama")
+                        KeyCap(text: "⌘N", dark: true)
+                    }
                 }
-            }
-            .buttonStyle(EmberButton())
-            .disabled(model.repos.isEmpty)
-            if model.repos.isEmpty {
-                Button("Cadastrar repositórios…") {
-                    let folders = Terminal.choosePaths(multiple: true, title: "Escolha os repositórios que podem entrar em tramas")
-                    Task { await model.addRepos(folders) }
+                .buttonStyle(EmberButton())
+                .disabled(model.repos.isEmpty)
+                if model.repos.isEmpty {
+                    Button("Cadastrar repositórios…") {
+                        let folders = Terminal.choosePaths(multiple: true, title: "Escolha os repositórios que podem entrar em tramas")
+                        Task { await model.addRepos(folders) }
+                    }
+                    .buttonStyle(GhostButton())
                 }
-                .buttonStyle(GhostButton())
             }
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
+
+struct EmptyStateView: View {
+    var body: some View {
+        HomeHero()
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
 
