@@ -856,17 +856,20 @@ struct TramaAgentBadge: View {
         if let ag = agent {
             HStack(spacing: 6) {
                 Image(systemName: icon)
-                    .font(.system(size: 11, weight: .medium))
+                    .font(.system(size: 10, weight: .medium))
                     .opacity(ag.isWorking && pulse ? 0.45 : 1)
-                Text("Agente da trama · \(ag.rootStateLabel)")
-                    .font(.system(size: 12))
+                Text("Agente · \(ag.rootStateLabel)")
+                    .font(.system(size: 11))
             }
             .foregroundStyle(tone.fg)
             .lineLimit(1)
-            .padding(.horizontal, 9)
-            .frame(height: 24)
+            .fixedSize(horizontal: true, vertical: false)
+            .padding(.horizontal, 8)
+            .frame(height: 22)
             .background(Capsule().fill(tone.bg))
-            .overlay(Capsule().stroke(tone.fg.opacity(0.35), lineWidth: 1))
+            .overlay(Capsule().stroke(tone.fg.opacity(ag.isWorking && pulse ? 0.75 : 0.35), lineWidth: 1))
+            .scaleEffect(ag.isWorking && pulse ? 1.03 : 1)
+            .animation(reduceMotion ? nil : .easeInOut(duration: 0.3), value: ag.rootStateLabel)
             .help(ag.message ?? "Agent da raiz da trama, que coordena todos os repositórios")
             .onAppear {
                 guard !reduceMotion else { return }
