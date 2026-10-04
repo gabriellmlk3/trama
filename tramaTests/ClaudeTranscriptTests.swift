@@ -30,6 +30,23 @@ final class ClaudeTranscriptTests: XCTestCase {
         XCTAssertEqual(conversation.items.map(\.kind), [.user, .assistant])
     }
 
+    func testDeleteRemovesOnlyTheChosenConversation() throws {
+        let lab = try Lab()
+        defer { lab.cleanup() }
+        let folder = Paths.join(lab.root, "trama-y")
+        try FileManager.default.createDirectory(atPath: folder, withIntermediateDirectories: true)
+        let dir = ClaudeSessions.projectDirectory(for: folder, home: lab.root)
+        try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        let line = #"{"type":"user","message":{"role":"user","content":"oi"}}"# + "\n"
+        for id in ["a", "b"] {
+            try line.write(toFile: Paths.join(dir, "\(id).jsonl"), atomically: true, encoding: .utf8)
+        }
+
+        XCTAssertTrue(ClaudeSessions.delete(id: "a", at: folder, home: lab.root))
+        XCTAssertEqual(ClaudeSessions.conversations(at: folder, home: lab.root).map(\.id), ["b"])
+        XCTAssertFalse(ClaudeSessions.delete(id: "a", at: folder, home: lab.root))
+    }
+
     func testTramaInstructionsNameTheRepositories() {
         let text = TramaAgent.instructions(title: "Melhorias", branch: "trama/melhorias", repos: ["api", "admin"])
         XCTAssertTrue(text.contains("“Melhorias”"))

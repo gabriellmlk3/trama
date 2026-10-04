@@ -9,6 +9,8 @@ final class GeneralAgentSession: ObservableObject {
     let role: String
     var onTurnEnd: ((GeneralAgentSession) -> Void)?
     var attachmentsDir: String?
+    var onRemember: ((AgentDenial) -> Void)?
+    private(set) var grants: AgentGrants
     private var resumeID: String?
     @Published private(set) var conversation = AgentConversation()
     @Published private(set) var running = false
@@ -22,11 +24,12 @@ final class GeneralAgentSession: ObservableObject {
     private var onceRules: [String] = []
     private var granted: [String] = []
 
-    init(path: String, extraDirs: [String], role: String = HomeAgent.instructions, resume: String? = nil) {
+    init(path: String, extraDirs: [String], role: String = HomeAgent.instructions, resume: String? = nil, grants: AgentGrants = AgentGrants()) {
         self.path = path
         self.extraDirs = extraDirs
         self.role = role
         self.resumeID = resume
+        self.grants = grants
         if let resume {
             conversation.addHistory(ClaudeSessions.transcript(id: resume, at: path))
             conversation.addNotice("Conversa retomada · as mensagens acima vêm do histórico.")
@@ -110,6 +113,19 @@ final class GeneralAgentSession: ObservableObject {
         continueAfterDecision()
     }
 
+    var canRemember: Bool { onRemember != nil }
+
+    func allowAlways(_ denial: AgentDenial) {
+        guard pendingPermissions.contains(denial), canRemember else { return }
+        grants.add(rule: denial.onceRule, directory: denial.directory)
+        onRemember?(denial)
+        allow(denial, forSession: false)
+    }
+
+    func replaceGrants(_ new: AgentGrants) {
+        grants = new
+    }
+
     func deny(_ denial: AgentDenial) {
         pendingPermissions.removeAll { $0 == denial }
         continueAfterDecision()
@@ -127,8 +143,8 @@ final class GeneralAgentSession: ObservableObject {
         AgentCLI.arguments(
             role: role,
             sessionID: conversation.sessionID ?? resumeID,
-            extraTools: sessionRules + onceRules,
-            directories: extraDirs + sessionDirs + [attachmentsDir].compactMap { $0 }
+            extraTools: grants.rules + sessionRules + onceRules,
+            directories: extraDirs + grants.directories + sessionDirs + [attachmentsDir].compactMap { $0 }
         )
     }
 

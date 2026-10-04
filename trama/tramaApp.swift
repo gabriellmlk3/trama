@@ -40,10 +40,12 @@ struct TramaApp: App {
                 Button("Nova trama…") { model.showingNewTrama = true }
                     .keyboardShortcut("n")
             }
+            CommandGroup(replacing: .help) {
+                Button("Tutorial do Trama") { model.showingOnboarding = true }
+            }
             CommandMenu("Trama") {
                 Button("Início") { model.screen = .home }
                     .keyboardShortcut("0")
-                Button("Introdução") { model.showingOnboarding = true }
                 Divider()
                 Button("Abrir agent") {
                     if let t = model.selectedTrama { model.openClaudeInAll(t) }

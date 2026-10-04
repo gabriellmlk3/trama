@@ -46,9 +46,13 @@ struct Sidebar: View {
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
-                    SidebarSection(title: "Tecendo agora", tramas: model.active)
-                    if !model.parked.isEmpty {
-                        SidebarSection(title: "Estacionadas", tramas: model.parked)
+                    if !model.pinnedTramas.isEmpty {
+                        SidebarSection(title: "Fixadas", tramas: model.pinnedTramas)
+                    }
+                    SidebarSection(title: "Tecendo agora", tramas: model.active.filter { !$0.pinned })
+                    let parked = model.parked.filter { !$0.pinned }
+                    if !parked.isEmpty {
+                        SidebarSection(title: "Estacionadas", tramas: parked)
                     }
                 }
             }
@@ -105,7 +109,7 @@ struct SidebarSection: View {
                     .padding(.horizontal, 8)
             }
             ForEach(tramas) { t in
-                TramaItem(trama: t)
+                TramaItem(trama: t, section: tramas)
             }
         }
     }
@@ -114,6 +118,7 @@ struct SidebarSection: View {
 struct TramaItem: View {
     @EnvironmentObject var model: AppModel
     let trama: LiveTrama
+    var section: [LiveTrama] = []
 
     var selected: Bool { model.screen == .trama(trama.slug) }
 
@@ -134,6 +139,11 @@ struct TramaItem: View {
                         .lineLimit(1)
                 }
                 Spacer(minLength: 4)
+                if trama.pinned {
+                    Image(systemName: "pin.fill")
+                        .font(.system(size: 9))
+                        .foregroundStyle(Theme.faded)
+                }
                 TramaIndicator(trama: trama, agents: model.agents(for: trama.slug), docked: model.hasBusyAgent(in: trama.slug), permissions: model.permissionCount(in: trama.slug))
             }
             .padding(.horizontal, 10)
@@ -143,7 +153,21 @@ struct TramaItem: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .draggable(trama.slug)
+        .dropDestination(for: String.self) { slugs, _ in
+            guard let dragged = slugs.first, section.contains(where: { $0.slug == dragged }) else { return false }
+            Task { await model.moveTrama(dragged, to: trama.slug, in: section) }
+            return true
+        }
         .contextMenu {
+            Button(trama.pinned ? "Desafixar" : "Fixar no topo") { Task { await model.setPinned(trama.slug, !trama.pinned) } }
+            if section.count > 1 {
+                Button("Mover para cima") { Task { await model.shiftTrama(trama.slug, by: -1, in: section) } }
+                    .disabled(section.first?.slug == trama.slug)
+                Button("Mover para baixo") { Task { await model.shiftTrama(trama.slug, by: 1, in: section) } }
+                    .disabled(section.last?.slug == trama.slug)
+            }
+            Divider()
             if trama.isActive {
                 Button("Abrir agent") { model.openClaudeInAll(trama) }
                 Button("Estacionar") { Task { await model.park(trama.slug) } }
@@ -171,7 +195,7 @@ struct TramaIndicator: View {
                     .foregroundStyle(Theme.faded)
             } else if permissions > 0 {
                 Dot(color: Theme.wait, halo: true)
-                Text("\(permissions + waiting)").foregroundStyle(Theme.wait)
+                Text("\(max(permissions, waiting))").foregroundStyle(Theme.wait)
                     .help("Um agent embutido pediu permissão")
             } else if waiting > 0 {
                 Dot(color: Theme.wait)

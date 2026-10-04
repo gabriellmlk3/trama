@@ -62,11 +62,13 @@ public struct Config: Codable, Sendable {
     public var context: String?
     public var capsuleFolder = "tramas"
     public var agentPullPolicy = AgentPullPolicy.free
+    public var agentGrants: [String: AgentGrants] = [:]
     public var repos: [RepoConfig] = []
 
     enum CodingKeys: String, CodingKey {
         case version = "versao", branchPrefix = "prefixoBranch", defaultBranch = "basePadrao"
         case context = "contexto", capsuleFolder = "pastaCapsulas", agentPullPolicy = "puxadaDeAgentes", repos
+        case agentGrants = "permissoesDeAgentes"
     }
 
     public init() {}
@@ -79,6 +81,7 @@ public struct Config: Codable, Sendable {
         context = try c.decodeIfPresent(String.self, forKey: .context)
         capsuleFolder = try c.decodeIfPresent(String.self, forKey: .capsuleFolder) ?? ""
         agentPullPolicy = (try? c.decodeIfPresent(AgentPullPolicy.self, forKey: .agentPullPolicy)) ?? .free
+        agentGrants = (try? c.decodeIfPresent([String: AgentGrants].self, forKey: .agentGrants)) ?? [:]
         repos = try c.decodeIfPresent([RepoConfig].self, forKey: .repos) ?? []
         if branchPrefix.isEmpty { branchPrefix = "trama/" }
         if defaultBranch.isEmpty { defaultBranch = "main" }
@@ -108,6 +111,8 @@ public struct Trama: Codable, Hashable, Identifiable, Sendable {
     public var createdAt: Int64
     public var parkedAt: Int64?
     public var updatedAt: Int64
+    public var pinned = false
+    public var order: Int?
 
     public var id: String { slug }
     public var isActive: Bool { state == TramaState.active }
@@ -117,6 +122,7 @@ public struct Trama: Codable, Hashable, Identifiable, Sendable {
     enum CodingKeys: String, CodingKey {
         case slug, title = "titulo", branch, base, repos, state = "estado", task = "tarefa", context = "contexto"
         case portIndex = "indicePorta", prs, prBases = "destinosPR", createdAt = "criadaEm", parkedAt = "estacionadaEm", updatedAt = "atualizadaEm"
+        case pinned = "fixada", order = "ordem"
     }
 
     init(slug: String, title: String, branch: String, base: String?, repos: [String], state: String, task: String?, createdAt: Int64) {
@@ -148,6 +154,8 @@ public struct Trama: Codable, Hashable, Identifiable, Sendable {
         createdAt = try c.decodeIfPresent(Int64.self, forKey: .createdAt) ?? 0
         parkedAt = try c.decodeIfPresent(Int64.self, forKey: .parkedAt)
         updatedAt = try c.decodeIfPresent(Int64.self, forKey: .updatedAt) ?? createdAt
+        pinned = try c.decodeIfPresent(Bool.self, forKey: .pinned) ?? false
+        order = try c.decodeIfPresent(Int.self, forKey: .order)
         if base?.isEmpty == true { base = nil }
         if task?.isEmpty == true { task = nil }
         if context?.isEmpty == true { context = nil }

@@ -8,6 +8,7 @@ struct PreferencesView: View {
     @State private var localError: String?
     @State private var defaultBranch = ""
     @State private var pullPolicy = AgentPullPolicy.free
+    @State private var grants: [String: AgentGrants] = [:]
     @AppStorage(ClaudeTarget.storageKey) private var claudeTarget = ClaudeTarget.docked.rawValue
     @AppStorage(AgentScope.storageKey) private var agentScope = AgentScope.single.rawValue
     @State private var editingRecipe: RepoConfig?
@@ -231,6 +232,34 @@ struct PreferencesView: View {
                     .foregroundStyle(.secondary)
             }
 
+            Section {
+                if grantRows.isEmpty {
+                    Text("Nenhuma permissão guardada.")
+                        .foregroundStyle(.secondary)
+                }
+                ForEach(grantRows) { row in
+                    LabeledContent {
+                        Button("Revogar") { revoke(row) }
+                    } label: {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(row.value)
+                                .font(.system(.body, design: .monospaced))
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                            Text(row.title)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+            } header: {
+                Text("Permissões dos agents")
+            } footer: {
+                Text("Guardadas com “Sempre nesta trama” no cartão de permissão do agent. Valem para todas as sessões embutidas da trama até você revogar.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
             Section("Repositórios") {
                 ForEach(model.repos) { r in
                     LabeledContent {
@@ -275,6 +304,32 @@ struct PreferencesView: View {
         if let w = try? Workspace.open() {
             defaultBranch = w.config.defaultBranch
             pullPolicy = w.config.agentPullPolicy
+            grants = w.config.agentGrants
+        }
+    }
+
+    struct GrantRow: Identifiable {
+        var slug: String
+        var title: String
+        var rule: String?
+        var directory: String?
+        var id: String { slug + "|" + (rule ?? "") + "|" + (directory ?? "") }
+        var value: String { rule ?? directory.map { Paths.abbreviate($0) } ?? "" }
+    }
+
+    var grantRows: [GrantRow] {
+        grants.keys.sorted().flatMap { slug -> [GrantRow] in
+            let title = model.state?.tramas.first { $0.slug == slug }?.title ?? slug
+            let entry = grants[slug] ?? AgentGrants()
+            return entry.rules.map { GrantRow(slug: slug, title: title, rule: $0) }
+                + entry.directories.map { GrantRow(slug: slug, title: "\(title) · pasta", directory: $0) }
+        }
+    }
+
+    func revoke(_ row: GrantRow) {
+        Task {
+            await model.revokeAgentGrant(slug: row.slug, rule: row.rule, directory: row.directory)
+            reload()
         }
     }
 

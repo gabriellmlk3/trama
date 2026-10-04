@@ -46,23 +46,26 @@ final class AppModel: ObservableObject {
     @Published var agentDialogRepo: String?
     @Published var agentDialogDirect = false
     private var lastAgentScope: [String: String] = [:]
+    private var lastAgentKey: [String: String] = [:]
+    private var agentCounter = 0
+    @Published var agentDialogKey: String?
 
     @Published private(set) var permissionCounts: [String: Int] = [:]
 
     var permissionCount: Int { permissionCounts.values.reduce(0, +) }
 
-    var waitingCount: Int { activeAgents.filter { $0.isWaiting }.count + permissionCount }
+    var waitingCount: Int { activeAgents.filter { $0.isWaiting }.count }
 
     func permissionCount(in slug: String) -> Int {
-        permissionCounts.filter { $0.key == slug || $0.key.hasPrefix(slug + "/") }.values.reduce(0, +)
+        permissionCounts.filter { Self.agentScope($0.key).slug == slug }.values.reduce(0, +)
     }
 
     var permissionRequest: (trama: LiveTrama, repo: String?, summary: String)? {
         for key in permissionCounts.keys.sorted() {
-            let parts = key.split(separator: "/", maxSplits: 1).map(String.init)
-            guard let trama = state?.tramas.first(where: { $0.slug == parts[0] }),
+            let scope = Self.agentScope(key)
+            guard let trama = state?.tramas.first(where: { $0.slug == scope.slug }),
                   let session = tramaAgents[key], let first = session.pendingPermissions.first else { continue }
-            return (trama, parts.count > 1 ? parts[1] : nil, first.summary)
+            return (trama, scope.repo, first.summary)
         }
         return nil
     }
@@ -116,10 +119,46 @@ final class AppModel: ObservableObject {
     }
 
     private func refreshAgents() async {
-        guard let current = state, let agents = try? await Core.run({ try $0.agents() }), agents != current.agents else { return }
+        guard state != nil, let agents = try? await Core.run({ try $0.agents() }), agents != hookAgents else { return }
         state?.agents = agents
         if let state { notifyTransitions(state) }
+        mergeDockedAgents()
     }
+
+    private func dockedAgent(key: String, session: GeneralAgentSession) -> Agent {
+        let scope = Self.agentScope(key)
+        let now = Int64(Date().timeIntervalSince1970)
+        var agent = Agent(session: session.conversation.sessionID ?? "docked:" + key, trama: scope.slug, repo: scope.repo ?? "",
+                          cwd: session.path, state: AgentState.open, startedAt: now, updatedAt: now)
+        if let pending = session.pendingPermissions.first {
+            agent.state = AgentState.waiting
+            agent.message = pending.summary
+        } else if session.running {
+            agent.state = AgentState.working
+        } else if session.lastReply != nil {
+            agent.state = AgentState.done
+        }
+        return agent
+    }
+
+    private func mergeDockedAgents() {
+        guard var current = state else { return }
+        let docked = tramaAgents.map { dockedAgent(key: $0.key, session: $0.value) }
+        let sessions = Set(docked.map(\.session))
+        var merged = hookAgents.filter { !sessions.contains($0.session) } + docked
+        merged.sort { $0.updatedAt > $1.updatedAt }
+        current.agents = merged
+        for t in current.tramas.indices {
+            for s in current.tramas[t].status.indices {
+                let slug = current.tramas[t].slug
+                let repo = current.tramas[t].status[s].repo
+                current.tramas[t].status[s].agents = merged.filter { $0.trama == slug && $0.repo == repo }
+            }
+        }
+        state = current
+    }
+
+    private var hookAgents: [Agent] { knownAgents ?? [] }
 
     private func refreshProposal() async {
         let current = try? await Core.run { $0.currentProposal() }
@@ -134,6 +173,7 @@ final class AppModel: ObservableObject {
             let new = try await Core.run { try $0.fullState() }
             state = new
             notifyTransitions(new)
+            mergeDockedAgents()
             needsSetup = false
             if screen == nil { screen = .home }
             if let t = selectedTrama {
@@ -287,7 +327,33 @@ final class AppModel: ObservableObject {
         }
     }
 
-    var visibleTramas: [LiveTrama] { state?.tramas.filter { !$0.isArchived } ?? [] }
+    var visibleTramas: [LiveTrama] {
+        (state?.tramas.filter { !$0.isArchived } ?? []).sorted {
+            ($0.order ?? Int.max, $0.createdAt) < ($1.order ?? Int.max, $1.createdAt)
+        }
+    }
+    var pinnedTramas: [LiveTrama] { visibleTramas.filter { $0.pinned } }
+
+    func setPinned(_ slug: String, _ pinned: Bool) async {
+        await perform { try $0.setPinned(slug, pinned) }
+    }
+
+    func moveTrama(_ slug: String, to target: String, in list: [LiveTrama]) async {
+        var slugs = list.map(\.slug)
+        guard slug != target, let from = slugs.firstIndex(of: slug), let to = slugs.firstIndex(of: target) else { return }
+        slugs.remove(at: from)
+        slugs.insert(slug, at: to)
+        let order = slugs
+        await perform { try $0.reorderTramas(order) }
+    }
+
+    func shiftTrama(_ slug: String, by step: Int, in list: [LiveTrama]) async {
+        var slugs = list.map(\.slug)
+        guard let from = slugs.firstIndex(of: slug), slugs.indices.contains(from + step) else { return }
+        slugs.swapAt(from, from + step)
+        let order = slugs
+        await perform { try $0.reorderTramas(order) }
+    }
     var active: [LiveTrama] { visibleTramas.filter { $0.isActive } }
     var parked: [LiveTrama] { visibleTramas.filter { $0.isParked } }
     var repos: [RepoConfig] { state?.repos ?? [] }
@@ -531,20 +597,37 @@ final class AppModel: ObservableObject {
         return session
     }
 
-    private func agentKey(_ slug: String, _ repo: String?) -> String {
+    private func agentBase(_ slug: String, _ repo: String?) -> String {
         repo.map { "\(slug)/\($0)" } ?? slug
     }
 
-    func tramaAgent(for slug: String, repo: String? = nil) -> GeneralAgentSession? {
-        tramaAgents[agentKey(slug, repo)]
+    nonisolated static func agentScope(_ key: String) -> (slug: String, repo: String?) {
+        let base = key.split(separator: "#", maxSplits: 1).first.map(String.init) ?? key
+        let parts = base.split(separator: "/", maxSplits: 1).map(String.init)
+        return (parts.first ?? base, parts.count > 1 ? parts[1] : nil)
+    }
+
+    private func agentNumber(_ key: String) -> Int {
+        key.split(separator: "#").last.flatMap { Int($0) } ?? 0
+    }
+
+    func liveAgents(_ slug: String, repo: String? = nil) -> [(key: String, session: GeneralAgentSession)] {
+        tramaAgents
+            .filter { Self.agentScope($0.key) == (slug, repo) }
+            .sorted { agentNumber($0.key) < agentNumber($1.key) }
+            .map { (key: $0.key, session: $0.value) }
+    }
+
+    func tramaAgent(key: String?) -> GeneralAgentSession? {
+        key.flatMap { tramaAgents[$0] }
     }
 
     func isAgentBusy(_ slug: String, repo: String? = nil) -> Bool {
-        busyAgents.contains(agentKey(slug, repo))
+        busyAgents.contains { Self.agentScope($0) == (slug, repo) }
     }
 
     func hasBusyAgent(in slug: String) -> Bool {
-        busyAgents.contains { $0 == slug || $0.hasPrefix(slug + "/") }
+        busyAgents.contains { Self.agentScope($0).slug == slug }
     }
 
     func agentPath(_ t: LiveTrama, repo: String?) -> String {
@@ -552,19 +635,28 @@ final class AppModel: ObservableObject {
     }
 
     @discardableResult
-    func startTramaAgent(_ t: LiveTrama, repo: String? = nil, resume: String?) -> GeneralAgentSession {
-        let key = agentKey(t.slug, repo)
-        tramaAgents[key]?.stop()
+    func startTramaAgent(_ t: LiveTrama, repo: String? = nil, resume: String?) -> (key: String, session: GeneralAgentSession) {
+        if let resume, let live = liveAgents(t.slug, repo: repo).first(where: { $0.session.conversation.sessionID == resume }) {
+            return live
+        }
+        agentCounter += 1
+        let key = "\(agentBase(t.slug, repo))#\(agentCounter)"
         let session: GeneralAgentSession
+        let grants = (try? Workspace.open())?.agentGrants(t.slug) ?? AgentGrants()
         if let repo {
             let role = TramaAgent.repoInstructions(title: t.title, branch: t.branch, repo: repo, others: t.repos.filter { $0 != repo })
-            session = GeneralAgentSession(path: worktreePath(t, repo), extraDirs: [], role: role, resume: resume)
+            session = GeneralAgentSession(path: worktreePath(t, repo), extraDirs: [], role: role, resume: resume, grants: grants)
         } else {
             let role = TramaAgent.instructions(title: t.title, branch: t.branch, repos: t.repos)
-            session = GeneralAgentSession(path: t.path, extraDirs: t.repos.map { worktreePath(t, $0) }, role: role, resume: resume)
+            session = GeneralAgentSession(path: t.path, extraDirs: t.repos.map { worktreePath(t, $0) }, role: role, resume: resume, grants: grants)
+        }
+        let slug = t.slug
+        session.onRemember = { [weak self] denial in
+            self?.rememberGrant(slug: slug, denial: denial, from: session)
         }
         session.attachmentsDir = AgentAttachments.directory(root: state?.root ?? Workspace.defaultRoot())
         lastAgentScope[t.slug] = repo ?? ""
+        lastAgentKey[t.slug] = key
         let label = repo.map { "\(t.title) · \($0)" } ?? t.title
         session.onTurnEnd = { [weak self] finished in
             self?.agentTurnEnded(finished, slug: t.slug, repo: repo, label: label)
@@ -572,13 +664,58 @@ final class AppModel: ObservableObject {
         agentWatchers[key] = session.$running.removeDuplicates().sink { [weak self] running in
             guard let self else { return }
             if running { self.busyAgents.insert(key) } else { self.busyAgents.remove(key) }
+            DispatchQueue.main.async { self.mergeDockedAgents() }
         }
         agentWatchers["permission:" + key] = session.$pendingPermissions.map(\.count).removeDuplicates().sink { [weak self] count in
             guard let self else { return }
             if count > 0 { self.permissionCounts[key] = count } else { self.permissionCounts.removeValue(forKey: key) }
+            DispatchQueue.main.async { self.mergeDockedAgents() }
         }
         tramaAgents[key] = session
-        return session
+        mergeDockedAgents()
+        return (key, session)
+    }
+
+    private func rememberGrant(slug: String, denial: AgentDenial, from origin: GeneralAgentSession) {
+        let rule = denial.onceRule
+        let directory = denial.directory
+        for (key, session) in tramaAgents where Self.agentScope(key).slug == slug && session !== origin {
+            var grants = session.grants
+            grants.add(rule: rule, directory: directory)
+            session.replaceGrants(grants)
+        }
+        Task {
+            do {
+                try await Core.run { try $0.grantAgent(slug, rule: rule, directory: directory) }
+                showNotice("Liberado em todas as sessões desta trama · revogue em Ajustes")
+            } catch {
+                showError(errorMessage(error))
+            }
+        }
+    }
+
+    func revokeAgentGrant(slug: String, rule: String?, directory: String?) async {
+        do {
+            try await Core.run { try $0.revokeAgent(slug, rule: rule, directory: directory) }
+            for (key, session) in tramaAgents where Self.agentScope(key).slug == slug {
+                var grants = session.grants
+                grants.remove(rule: rule, directory: directory)
+                session.replaceGrants(grants)
+            }
+        } catch {
+            showError(errorMessage(error))
+        }
+    }
+
+    func closeTramaAgent(key: String) {
+        tramaAgents[key]?.stop()
+        tramaAgents.removeValue(forKey: key)
+        agentWatchers.removeValue(forKey: key)
+        agentWatchers.removeValue(forKey: "permission:" + key)
+        busyAgents.remove(key)
+        permissionCounts.removeValue(forKey: key)
+        for (slug, last) in lastAgentKey where last == key { lastAgentKey.removeValue(forKey: slug) }
+        mergeDockedAgents()
     }
 
     private func agentTurnEnded(_ session: GeneralAgentSession, slug: String, repo: String?, label: String) {
@@ -590,22 +727,28 @@ final class AppModel: ObservableObject {
 
     func openAgent(_ t: LiveTrama, repo: String? = nil, handoff: CapsuleItem? = nil) {
         agentDialogDirect = false
+        agentDialogKey = nil
         if let handoff {
             let target = handoff.to.flatMap { t.repos.contains($0) ? $0 : nil } ?? repo
-            let session = startTramaAgent(t, repo: target, resume: nil)
-            session.send(TramaAgent.handoffPrompt(from: handoff.from, to: handoff.to, number: handoff.index, text: handoff.text))
+            let started = startTramaAgent(t, repo: target, resume: nil)
+            started.session.send(TramaAgent.handoffPrompt(from: handoff.from, to: handoff.to, number: handoff.index, text: handoff.text))
             agentDialogRepo = target
+            agentDialogKey = started.key
             agentDialogDirect = true
         } else {
             let target = repo ?? lastAgentScope[t.slug].flatMap { $0.isEmpty ? nil : $0 }
+            let live = liveAgents(t.slug, repo: target)
+            let key = lastAgentKey[t.slug].flatMap { last in live.first { $0.key == last }?.key } ?? live.last?.key
             agentDialogRepo = target
-            agentDialogDirect = tramaAgents[agentKey(t.slug, target)] != nil && (repo != nil || lastAgentScope[t.slug] != nil)
+            agentDialogKey = key
+            agentDialogDirect = key != nil && (repo != nil || lastAgentScope[t.slug] != nil)
         }
         agentDialog = t
     }
 
-    func rememberAgent(slug: String, repo: String?) {
+    func rememberAgent(slug: String, repo: String?, key: String?) {
         lastAgentScope[slug] = repo ?? ""
+        lastAgentKey[slug] = key
     }
 
     func openTramaInConsole(_ t: LiveTrama, repo: String? = nil, resume: ClaudeResume) {

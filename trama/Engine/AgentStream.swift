@@ -43,6 +43,8 @@ struct AgentResult: Equatable {
     var costUSD: Double?
     var durationMS: Int?
     var denials: [AgentDenial]
+    var inputTokens: Int?
+    var outputTokens: Int?
 
     var deniedTools: [String] { denials.map(\.summary) }
 }
@@ -139,12 +141,16 @@ struct AgentStreamParser {
             guard let name = denial["tool_name"] as? String else { return nil }
             return AgentDenial(tool: name, input: denial["tool_input"] as? [String: Any] ?? [:])
         }
+        let usage = object["usage"] as? [String: Any]
+        let inputKeys = ["input_tokens", "cache_creation_input_tokens", "cache_read_input_tokens"]
         return AgentResult(
             isError: object["is_error"] as? Bool ?? false,
             message: object["result"] as? String,
             costUSD: object["total_cost_usd"] as? Double,
             durationMS: object["duration_ms"] as? Int,
-            denials: denials
+            denials: denials,
+            inputTokens: usage.map { usage in inputKeys.reduce(0) { $0 + (usage[$1] as? Int ?? 0) } },
+            outputTokens: usage?["output_tokens"] as? Int
         )
     }
 
@@ -190,7 +196,13 @@ struct AgentConversation: Equatable {
     private(set) var sessionID: String?
     private(set) var model: String?
     private(set) var costUSD: Double = 0
+    private(set) var inputTokens = 0
+    private(set) var outputTokens = 0
     private var nextID = 0
+
+    var usageLabel: String? {
+        AgentUsage.label(cost: costUSD, tokens: inputTokens + outputTokens)
+    }
 
     mutating func addUser(_ text: String, attachments: [String] = []) {
         append(.user, text)
@@ -233,6 +245,8 @@ struct AgentConversation: Equatable {
         case .finished(let result):
             closeLiveText()
             costUSD += result.costUSD ?? 0
+            inputTokens += result.inputTokens ?? 0
+            outputTokens += result.outputTokens ?? 0
             if result.isError { addError(result.message ?? "O Claude terminou com erro.") }
             if !result.deniedTools.isEmpty {
                 let names = Array(Set(result.deniedTools)).sorted().joined(separator: ", ")

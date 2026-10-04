@@ -6,6 +6,11 @@ public struct ClaudeConversation: Hashable, Identifiable, Sendable {
     public var modifiedAt: Date
 }
 
+public struct TrashedConversation: Hashable, Sendable {
+    public var original: URL
+    public var trashed: URL
+}
+
 public enum ClaudeSessions {
     private static let headBytes = 256 * 1024
 
@@ -27,6 +32,33 @@ public enum ClaudeSessions {
             .map { file in
                 ClaudeConversation(id: file.id, title: title(ofFile: file.path) ?? "Conversa sem título", modifiedAt: file.modifiedAt)
             }
+    }
+
+    @discardableResult
+    public static func delete(id: String, at path: String, home: String = Paths.home) -> Bool {
+        !trash(id: id, at: path, home: home).isEmpty
+    }
+
+    public static func trash(id: String, at path: String, home: String = Paths.home) -> [TrashedConversation] {
+        var trashed: [TrashedConversation] = []
+        for file in conversationFiles(at: path, home: home) where file.id == id {
+            var result: NSURL?
+            let original = URL(fileURLWithPath: file.path)
+            guard (try? FileManager.default.trashItem(at: original, resultingItemURL: &result)) != nil,
+                  let moved = result as URL? else { continue }
+            trashed.append(TrashedConversation(original: original, trashed: moved))
+        }
+        return trashed
+    }
+
+    @discardableResult
+    public static func restore(_ items: [TrashedConversation]) -> Bool {
+        let fm = FileManager.default
+        var restored = false
+        for item in items where !fm.fileExists(atPath: item.original.path) {
+            if (try? fm.moveItem(at: item.trashed, to: item.original)) != nil { restored = true }
+        }
+        return restored
     }
 
     public static func transcript(id: String, at path: String, limit: Int = 60, home: String = Paths.home) -> [(isUser: Bool, text: String)] {

@@ -453,6 +453,28 @@ extension Workspace {
         }
     }
 
+    public func setPinned(_ slug: String, _ pinned: Bool) throws {
+        try withLock {
+            var ts = try tramas()
+            guard let i = ts.firstIndex(where: { $0.slug == slug }) else {
+                throw TramaError("trama “\(slug)” não encontrada")
+            }
+            ts[i].pinned = pinned
+            try saveTramas(ts)
+        }
+    }
+
+    public func reorderTramas(_ slugs: [String]) throws {
+        try withLock {
+            var ts = try tramas()
+            for (position, slug) in slugs.enumerated() {
+                guard let i = ts.firstIndex(where: { $0.slug == slug }) else { continue }
+                ts[i].order = position
+            }
+            try saveTramas(ts)
+        }
+    }
+
     public func setBase(_ slug: String, base: String) throws -> Trama {
         let t = try trama(slug)
         guard !t.isArchived else { throw TramaError("essa trama está arquivada") }

@@ -6,12 +6,21 @@ struct TramaAgentDialog: View {
     let slug: String
     @State private var picking = true
     @State private var scope: String?
+    @State private var key: String?
     @State private var past: [ClaudeConversation] = []
     @State private var draft = ""
+    @State private var search = ""
+    @State private var undo: [TrashedConversation] = []
+    @State private var undoTitle = ""
     @FocusState private var focused: Bool
 
+    private var filteredPast: [ClaudeConversation] {
+        let term = search.trimmingCharacters(in: .whitespacesAndNewlines)
+        return term.isEmpty ? past : past.filter { $0.title.localizedCaseInsensitiveContains(term) }
+    }
+
     private var trama: LiveTrama? { model.state?.tramas.first { $0.slug == slug } }
-    private var session: GeneralAgentSession? { model.tramaAgent(for: slug, repo: scope) }
+    private var session: GeneralAgentSession? { model.tramaAgent(key: key) }
     private var scopePath: String? { trama.map { model.agentPath($0, repo: scope) } }
 
     var body: some View {
@@ -31,6 +40,7 @@ struct TramaAgentDialog: View {
         .task(id: scope) { await loadPast() }
         .onAppear {
             scope = model.agentDialogRepo
+            key = model.agentDialogKey
             picking = !model.agentDialogDirect
             model.agentDialogDirect = false
         }
@@ -70,33 +80,90 @@ struct TramaAgentDialog: View {
     }
 
     private var picker: some View {
+        VStack(spacing: 0) {
+            pickerList
+            if !undo.isEmpty { undoBar }
+        }
+    }
+
+    private var undoBar: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "trash").foregroundStyle(Theme.faded)
+            Text("“\(undoTitle)” foi para a Lixeira")
+                .font(.system(size: 12.5))
+                .foregroundStyle(Theme.text2)
+                .lineLimit(1)
+            Spacer()
+            Button("Desfazer", action: restore)
+                .buttonStyle(GhostButton(compact: true))
+        }
+        .padding(.horizontal, 18)
+        .frame(height: 44)
+        .background(Theme.surface2)
+        .overlay(alignment: .top) { Rectangle().fill(Theme.line).frame(height: 1) }
+        .task(id: undo) {
+            try? await Task.sleep(for: .seconds(8))
+            guard !Task.isCancelled else { return }
+            undo = []
+        }
+    }
+
+    private var pickerList: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 8) {
                 if let trama, trama.repos.count > 1 { scopeChooser(trama) }
                 row(icon: "plus", title: "Nova conversa", subtitle: "Começa do zero, sem contexto anterior") {
                     start(resume: nil)
                 }
-                if let session, !session.conversation.items.isEmpty {
+                let live = model.liveAgents(slug, repo: scope)
+                if !live.isEmpty {
                     sectionTitle("Em andamento")
-                    row(icon: session.running ? "ellipsis.bubble" : "bubble.left",
-                        title: current(session),
-                        subtitle: session.running ? "respondendo agora" : "aberta neste app") {
-                        model.rememberAgent(slug: slug, repo: scope)
-                        picking = false
+                    ForEach(live, id: \.key) { entry in
+                        row(icon: entry.session.running ? "ellipsis.bubble" : "bubble.left",
+                            title: current(entry.session),
+                            subtitle: ([entry.session.running ? "respondendo agora" : "aberta neste app"] + [entry.session.conversation.usageLabel].compactMap { $0 }).joined(separator: " · "),
+                            trailingIcon: "xmark", trailingHelp: "Encerrar esta sessão",
+                            onDelete: { close(entry.key) }) {
+                            key = entry.key
+                            model.rememberAgent(slug: slug, repo: scope, key: entry.key)
+                            picking = false
+                        }
                     }
                 }
                 if !past.isEmpty {
                     sectionTitle("Sessões anteriores")
-                    ForEach(past) { conversation in
+                    if past.count > 5 { searchField }
+                    ForEach(filteredPast) { conversation in
                         row(icon: "clock.arrow.circlepath", title: conversation.title,
-                            subtitle: conversation.modifiedAt.formatted(.relative(presentation: .named))) {
+                            subtitle: "\(scope ?? "raiz da trama") · \(conversation.modifiedAt.formatted(.relative(presentation: .named)))",
+                            onDelete: { delete(conversation) }) {
                             start(resume: conversation.id)
                         }
+                    }
+                    if filteredPast.isEmpty {
+                        Text("Nenhuma conversa com “\(search)”.")
+                            .font(.system(size: 12))
+                            .foregroundStyle(Theme.faded)
                     }
                 }
             }
             .padding(18)
         }
+    }
+
+    private var searchField: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "magnifyingglass")
+                .font(.system(size: 12))
+                .foregroundStyle(Theme.faded)
+            TextField("Buscar nas conversas", text: $search)
+                .textFieldStyle(.plain)
+                .font(.system(size: 13))
+        }
+        .padding(.horizontal, 10)
+        .frame(height: 32)
+        .background(RoundedRectangle(cornerRadius: 8).fill(Theme.field))
+        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Theme.line2, lineWidth: 1))
     }
 
     private func scopeChooser(_ trama: LiveTrama) -> some View {
@@ -115,6 +182,7 @@ struct TramaAgentDialog: View {
         let selected = scope == repo
         return Button {
             scope = repo
+            key = nil
         } label: {
             HStack(spacing: 5) {
                 Text(title)
@@ -131,7 +199,7 @@ struct TramaAgentDialog: View {
     }
 
     private func current(_ session: GeneralAgentSession) -> String {
-        let first = session.conversation.items.first { $0.kind == .user }?.text ?? "Conversa atual"
+        let first = session.conversation.items.first { $0.kind == .user }?.text ?? "Nova conversa"
         let line = first.split(whereSeparator: \.isNewline).first.map(String.init) ?? first
         return line.count > 70 ? String(line.prefix(70)) + "…" : line
     }
@@ -144,7 +212,25 @@ struct TramaAgentDialog: View {
             .padding(.top, 10)
     }
 
-    private func row(icon: String, title: String, subtitle: String, action: @escaping () -> Void) -> some View {
+    private func row(icon: String, title: String, subtitle: String, trailingIcon: String = "trash", trailingHelp: String = "Apagar esta sessão (vai para a Lixeira)", onDelete: (() -> Void)? = nil, action: @escaping () -> Void) -> some View {
+        ZStack(alignment: .trailing) {
+            rowButton(icon: icon, title: title, subtitle: subtitle, action: action)
+            if let onDelete {
+                Button(action: onDelete) {
+                    Image(systemName: trailingIcon)
+                        .font(.system(size: 12))
+                        .foregroundStyle(Theme.faded)
+                        .frame(width: 30, height: 30)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help(trailingHelp)
+                .padding(.trailing, 8)
+            }
+        }
+    }
+
+    private func rowButton(icon: String, title: String, subtitle: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             HStack(spacing: 12) {
                 Image(systemName: icon)
@@ -177,13 +263,43 @@ struct TramaAgentDialog: View {
 
     private func start(resume: String?) {
         guard let trama else { return }
-        model.startTramaAgent(trama, repo: scope, resume: resume)
+        let started = model.startTramaAgent(trama, repo: scope, resume: resume)
+        key = started.key
         picking = false
+    }
+
+    private func close(_ closing: String) {
+        model.closeTramaAgent(key: closing)
+        if key == closing { key = nil }
+    }
+
+    private func delete(_ conversation: ClaudeConversation) {
+        guard let path = scopePath else { return }
+        let id = conversation.id
+        let title = conversation.title
+        Task {
+            let trashed = await Task.detached { ClaudeSessions.trash(id: id, at: path) }.value
+            if !trashed.isEmpty {
+                undoTitle = title.count > 40 ? String(title.prefix(40)) + "…" : title
+                undo = trashed
+            }
+            await loadPast()
+        }
+    }
+
+    private func restore() {
+        let items = undo
+        undo = []
+        Task {
+            _ = await Task.detached { ClaudeSessions.restore(items) }.value
+            await loadPast()
+        }
     }
 
     private func loadPast() async {
         guard let path = scopePath else { return }
-        past = await Task.detached { ClaudeSessions.conversations(at: path, limit: 20) }.value
+        search = ""
+        past = await Task.detached { ClaudeSessions.conversations(at: path, limit: 50) }.value
     }
 }
 
@@ -203,6 +319,15 @@ private struct ChatBody: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 AgentConversationList(session: session)
+            }
+            if let usage = session.conversation.usageLabel {
+                Text("Esta conversa · \(usage)")
+                    .font(Theme.mono(10.5))
+                    .foregroundStyle(Theme.faded)
+                    .frame(maxWidth: .infinity, alignment: .trailing)
+                    .padding(.horizontal, 18)
+                    .padding(.top, 6)
+                    .help("Soma dos turnos desta sessão. Conversas retomadas contam só a partir da retomada.")
             }
             AgentInputBar(draft: $draft, running: session.running, focused: focused, attachmentsDir: session.attachmentsDir, onSend: send, onStop: { session.stop() }, onReset: nil)
                 .padding(.horizontal, 18)

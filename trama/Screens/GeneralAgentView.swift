@@ -44,6 +44,7 @@ struct GeneralAgentView<Hero: View>: View {
 
 struct AgentConversationList: View {
     @ObservedObject var session: GeneralAgentSession
+    @State private var scrollPending = false
 
     private var items: [AgentItem] { session.conversation.items }
 
@@ -51,9 +52,13 @@ struct AgentConversationList: View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 14) {
-                    ForEach(items) { item in
-                        AgentItemRow(item: item)
-                            .id(item.id)
+                    ForEach(rows) { row in
+                        switch row {
+                        case .item(let item):
+                            AgentItemRow(item: item)
+                        case .tools(let tools):
+                            AgentToolGroup(tools: tools)
+                        }
                     }
                     if session.running { AgentWorking() }
                     if !session.running {
@@ -61,6 +66,7 @@ struct AgentConversationList: View {
                             AgentPermissionCard(
                                 denial: denial,
                                 onAllow: { session.allow(denial, forSession: $0) },
+                                onAlways: session.canRemember ? { session.allowAlways(denial) } : nil,
                                 onDeny: { session.deny(denial) }
                             )
                         }
@@ -77,15 +83,28 @@ struct AgentConversationList: View {
                 DispatchQueue.main.async { proxy.scrollTo("bottom", anchor: .bottom) }
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { proxy.scrollTo("bottom", anchor: .bottom) }
             }
-            .onChange(of: items.last) { _, _ in
-                withAnimation(.easeOut(duration: 0.15)) {
-                    proxy.scrollTo("bottom", anchor: .bottom)
-                }
-            }
-            .onChange(of: session.pendingPermissions) { _, _ in
-                withAnimation(.easeOut(duration: 0.15)) {
-                    proxy.scrollTo("bottom", anchor: .bottom)
-                }
+            .onChange(of: scrollSignature) { _, _ in scheduleScroll(proxy) }
+            .onChange(of: session.pendingPermissions) { _, _ in scheduleScroll(proxy) }
+        }
+    }
+
+    private var rows: [AgentChatRow] { AgentChatRow.group(items) }
+
+    private var scrollSignature: Int {
+        var hasher = Hasher()
+        hasher.combine(items.count)
+        hasher.combine(items.last?.id)
+        hasher.combine(items.last?.text.count)
+        return hasher.finalize()
+    }
+
+    private func scheduleScroll(_ proxy: ScrollViewProxy) {
+        guard !scrollPending else { return }
+        scrollPending = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+            scrollPending = false
+            withAnimation(.easeOut(duration: 0.15)) {
+                proxy.scrollTo("bottom", anchor: .bottom)
             }
         }
     }
@@ -94,6 +113,7 @@ struct AgentConversationList: View {
 private struct AgentPermissionCard: View {
     let denial: AgentDenial
     let onAllow: (_ forSession: Bool) -> Void
+    let onAlways: (() -> Void)?
     let onDeny: () -> Void
 
     var body: some View {
@@ -119,6 +139,11 @@ private struct AgentPermissionCard: View {
                             .buttonStyle(GhostButton(compact: true))
                             .help("Libera \(rule) até o fim desta sessão")
                     }
+                }
+                if let onAlways {
+                    Button("Sempre nesta trama", action: onAlways)
+                        .buttonStyle(GhostButton(compact: true))
+                        .help(denial.directory.map { "Libera \($0) em todas as sessões desta trama · revogue em Ajustes" } ?? "Libera \(denial.onceRule ?? denial.tool) em todas as sessões desta trama · revogue em Ajustes")
                 }
                 Button("Negar", action: onDeny)
                     .buttonStyle(GhostButton(compact: true))
@@ -284,6 +309,97 @@ struct AgentItemRow: View {
     private func markdown(_ text: String) -> AttributedString {
         let options = AttributedString.MarkdownParsingOptions(interpretedSyntax: .inlineOnlyPreservingWhitespace)
         return (try? AttributedString(markdown: text, options: options)) ?? AttributedString(text)
+    }
+}
+
+enum AgentChatRow: Identifiable {
+    case item(AgentItem)
+    case tools([AgentItem])
+
+    var id: Int {
+        switch self {
+        case .item(let item): return item.id
+        case .tools(let tools): return tools[0].id
+        }
+    }
+
+    static func group(_ items: [AgentItem]) -> [AgentChatRow] {
+        var rows: [AgentChatRow] = []
+        var run: [AgentItem] = []
+        func flush() {
+            guard !run.isEmpty else { return }
+            rows.append(run.count == 1 ? .item(run[0]) : .tools(run))
+            run = []
+        }
+        for item in items {
+            if item.kind == .tool {
+                run.append(item)
+            } else {
+                flush()
+                rows.append(.item(item))
+            }
+        }
+        flush()
+        return rows
+    }
+}
+
+private struct AgentToolGroup: View {
+    let tools: [AgentItem]
+    @State private var open = false
+
+    private var current: AgentItem? { tools.last(where: { $0.result == nil }) }
+    private var failures: Int { tools.filter(\.resultIsError).count }
+
+    private var title: String {
+        if let current {
+            let isFile = ["Read", "Edit", "Write", "NotebookEdit"].contains(current.toolName)
+            return "\(current.toolName ?? "ferramenta") \(isFile ? Paths.name(current.text) : current.text)"
+        }
+        var counts: [String: Int] = [:]
+        for tool in tools { counts[tool.toolName ?? "ferramenta", default: 0] += 1 }
+        let parts = counts.sorted { $0.value == $1.value ? $0.key < $1.key : $0.value > $1.value }
+            .prefix(3).map { "\($0.value) \($0.key)" }
+        return parts.joined(separator: " · ")
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Button { open.toggle() } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: open ? "chevron.down" : "chevron.right")
+                        .font(.system(size: 10))
+                        .frame(width: 14)
+                    Text("\(tools.count) ações")
+                        .font(.system(size: 12, weight: .medium))
+                    Text(title)
+                        .font(Theme.mono(11.5))
+                        .foregroundStyle(Theme.faded)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                    Spacer(minLength: 8)
+                    if failures > 0 {
+                        Text("\(failures) com erro")
+                            .font(.system(size: 11))
+                            .foregroundStyle(Theme.dangerText)
+                    }
+                    if current != nil { ProgressView().controlSize(.mini) }
+                }
+                .foregroundStyle(Theme.text3)
+                .padding(.horizontal, 10)
+                .frame(height: 30)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .background(RoundedRectangle(cornerRadius: 8).fill(Theme.surface))
+            .overlay(RoundedRectangle(cornerRadius: 8).stroke(failures > 0 ? Theme.danger.opacity(0.5) : Theme.line2, lineWidth: 1))
+            if open {
+                VStack(alignment: .leading, spacing: 6) {
+                    ForEach(tools) { AgentToolCard(item: $0) }
+                }
+                .padding(.leading, 14)
+            }
+        }
     }
 }
 

@@ -637,8 +637,11 @@ struct HomeTramaCard: View {
     @EnvironmentObject var model: AppModel
     let trama: LiveTrama
     @State private var hovering = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var agents: [Agent] { model.agents(for: trama.slug) }
+    private var workingCount: Int { agents.filter { $0.isWorking }.count }
+    private var isWorking: Bool { workingCount > 0 }
 
     private var tone: Color {
         if trama.conflicts > 0 { return Theme.danger }
@@ -675,8 +678,13 @@ struct HomeTramaCard: View {
                             .lineLimit(1)
                     }
                     Spacer(minLength: 4)
-                    TramaIndicator(trama: trama, agents: agents)
-                        .padding(.top, 4)
+                    HStack(spacing: 8) {
+                        if !agents.isEmpty {
+                            HomeAgentCountPill(total: agents.count, working: workingCount)
+                        }
+                        TramaIndicator(trama: trama, agents: agents)
+                    }
+                    .padding(.top, 4)
                 }
                 VStack(spacing: 0) {
                     ForEach(Array(trama.status.prefix(4).enumerated()), id: \.element.id) { index, s in
@@ -718,6 +726,9 @@ struct HomeTramaCard: View {
                 )
             )
             .overlay(RoundedRectangle(cornerRadius: 16).stroke(hovering ? tone.opacity(0.5) : Theme.line2, lineWidth: 1))
+            .overlay {
+                if isWorking { HomeWorkingGlow(color: Theme.iris, reduceMotion: reduceMotion) }
+            }
             .contentShape(RoundedRectangle(cornerRadius: 16))
             .offset(y: hovering ? -2 : 0)
             .animation(.easeOut(duration: 0.15), value: hovering)
@@ -730,6 +741,62 @@ struct HomeTramaCard: View {
             Button("Mostrar no Finder") { Terminal.reveal(trama.path) }
             Button("Copiar nome da branch") { Terminal.copy(trama.branch) }
         }
+    }
+}
+
+struct HomeWorkingGlow: View {
+    let color: Color
+    let reduceMotion: Bool
+
+    var body: some View {
+        TimelineView(.animation(minimumInterval: 1.0 / 30, paused: reduceMotion)) { context in
+            let t = reduceMotion ? 0 : context.date.timeIntervalSinceReferenceDate
+            let angle = Angle.degrees((t * 90).truncatingRemainder(dividingBy: 360))
+            let breath = reduceMotion ? 0.5 : (sin(t * 2.2) + 1) / 2
+            let shape = RoundedRectangle(cornerRadius: 16)
+            ZStack {
+                shape
+                    .stroke(
+                        AngularGradient(
+                            colors: [color.opacity(0), color.opacity(0.9), color.opacity(0)],
+                            center: .center,
+                            angle: angle
+                        ),
+                        lineWidth: 1.5
+                    )
+                shape
+                    .stroke(color.opacity(0.10 + 0.14 * breath), lineWidth: 1)
+                    .blur(radius: 3)
+            }
+            .allowsHitTesting(false)
+        }
+    }
+}
+
+struct HomeAgentCountPill: View {
+    let total: Int
+    let working: Int
+
+    private var label: String {
+        if working > 0 {
+            return "\(working) \(plural(working, "agent trabalhando", "agents trabalhando"))"
+        }
+        return "\(total) \(plural(total, "agent", "agents"))"
+    }
+
+    var body: some View {
+        HStack(spacing: 5) {
+            Circle()
+                .fill(working > 0 ? Theme.iris : Theme.faded)
+                .frame(width: 5, height: 5)
+            Text(label)
+                .font(Theme.mono(10.5))
+                .foregroundStyle(working > 0 ? Theme.irisText : Theme.text3)
+        }
+        .padding(.horizontal, 8)
+        .frame(height: 20)
+        .background(Capsule().fill((working > 0 ? Theme.iris : Theme.faded).opacity(0.12)))
+        .help("\(total) \(plural(total, "agent aberto", "agents abertos")) nesta trama")
     }
 }
 
