@@ -57,6 +57,7 @@ public enum AgentSkill {
         - `trama puxar <trama> <repo>... --motivo "por que"` / `trama soltar <trama> <repo>` · inclui ou tira repositórios
         - `trama sugerir <repo|pasta> "motivo" --trama <slug>` · pede ao usuário para incluir outro repositório (cadastrado ou uma pasta git); ele aceita no app
         - `trama repo descobrir` · repositórios git ao lado dos cadastrados que ainda não estão no Trama
+        - `trama propor nova "Título" --repos a,b --objetivo "..."` / `trama propor existente <trama> [--repos a,b] [--para repo --handoff "texto"]` · mostra uma proposta na home do app para o usuário aprovar; nada é criado até ele aprovar
         - `trama abrir <trama>` · pede ao app aberto para abrir o Claude Code nessa trama (os handoffs pendentes são lidos ao iniciar)
         - `trama estacionar <trama>` / `trama retomar <trama> [--rebase]` · pausa e reativa; os worktrees ficam como estão
         - `trama arquivar <trama>` · remove os worktrees quando tudo foi mergeado; as branches ficam

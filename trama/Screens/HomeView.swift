@@ -99,9 +99,122 @@ struct HomeView: View {
     }
 }
 
-struct HomeAgentBar: View {
+struct HomeProposalCard: View {
+    @EnvironmentObject var model: AppModel
+    let proposal: Proposal
+    @State private var refining = false
+    @State private var note = ""
+    @State private var applying = false
+
+    private var heading: String {
+        proposal.isNew ? "Proposta · nova trama" : "Proposta · usar a trama existente"
+    }
+
+    private var approveLabel: String {
+        proposal.isNew ? "Aprovar e tecer" : "Aprovar e abrir"
+    }
+
     var body: some View {
-        HomeAgentBox()
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 8) {
+                Image(systemName: "sparkle")
+                    .font(.system(size: 12))
+                    .foregroundStyle(Theme.ember)
+                Text(heading.uppercased())
+                    .font(Theme.mono(10.5))
+                    .tracking(1.2)
+                    .foregroundStyle(Theme.emberText)
+            }
+            Text(proposal.title)
+                .font(Theme.serif(24))
+            if !proposal.goal.isEmpty {
+                row("Objetivo", proposal.goal)
+            }
+            if !proposal.repos.isEmpty {
+                row(proposal.isNew ? "Repositórios" : "Incluir repositórios", proposal.repos.joined(separator: " · "), mono: true)
+            }
+            if let to = proposal.handoffRepo, let text = proposal.handoffText {
+                row("Handoff para \(to)", text)
+            }
+            if !proposal.reason.isEmpty {
+                row("Motivo", proposal.reason)
+            }
+            if refining {
+                HStack(spacing: 8) {
+                    TextField("O que ajustar na proposta?", text: $note)
+                        .textFieldStyle(.plain)
+                        .font(.system(size: 13))
+                        .padding(.horizontal, 10)
+                        .frame(height: 30)
+                        .background(RoundedRectangle(cornerRadius: 8).fill(Theme.surface))
+                        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Theme.line2, lineWidth: 1))
+                        .onSubmit(sendNote)
+                    Button("Enviar ajuste", action: sendNote)
+                        .buttonStyle(GhostButton(compact: true))
+                        .disabled(note.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
+            }
+            HStack(spacing: 8) {
+                Button {
+                    applying = true
+                    Task {
+                        await model.approveProposal()
+                        applying = false
+                    }
+                } label: {
+                    HStack(spacing: 8) {
+                        if applying { ProgressView().controlSize(.small) }
+                        Text(approveLabel)
+                    }
+                }
+                .buttonStyle(EmberButton())
+                .disabled(applying)
+                Button(refining ? "Cancelar ajuste" : "Ajustar…") { refining.toggle() }
+                    .buttonStyle(GhostButton())
+                Spacer()
+                Button("Descartar") { model.discardProposal() }
+                    .buttonStyle(GhostButton())
+            }
+        }
+        .padding(16)
+        .frame(maxWidth: 1100, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 12).fill(Theme.surface))
+        .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.ember.opacity(0.45), lineWidth: 1))
+    }
+
+    private func row(_ label: String, _ value: String, mono: Bool = false) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 12) {
+            Text(label)
+                .font(.system(size: 12))
+                .foregroundStyle(Theme.faded)
+                .frame(width: 130, alignment: .leading)
+            Text(value)
+                .font(mono ? Theme.mono(12.5) : .system(size: 13))
+                .foregroundStyle(Theme.text2)
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    private func sendNote() {
+        let text = note.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return }
+        model.refineProposal(text)
+        note = ""
+        refining = false
+    }
+}
+
+struct HomeAgentBar: View {
+    @EnvironmentObject var model: AppModel
+
+    var body: some View {
+        VStack(spacing: 12) {
+            if let proposal = model.proposal {
+                HomeProposalCard(proposal: proposal)
+            }
+            HomeAgentBox()
+        }
             .padding(.horizontal, 40)
             .padding(.vertical, 14)
             .frame(maxWidth: .infinity)
@@ -117,7 +230,7 @@ struct HomeAgentPulse: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
-        HomeAgentPulseDot(state: model.homeAgent?.state, reduceMotion: reduceMotion)
+        HomeAgentPulseDot(state: model.homeAgentState, reduceMotion: reduceMotion)
     }
 }
 

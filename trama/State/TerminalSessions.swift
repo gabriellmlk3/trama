@@ -65,12 +65,13 @@ final class TerminalStore: ObservableObject {
         path + "\0" + (command ?? "")
     }
 
-    func open(path: String, command: String?, title: String, blocks: Bool = true) {
+    @discardableResult
+    func open(path: String, command: String?, title: String, blocks: Bool = true) -> TerminalSession.ID {
         let id = key(path: path, command: command)
         if let existing = sessions.first(where: { $0.id == id }), existing.running {
             selectedID = id
             expanded = true
-            return
+            return id
         }
         let engine = SwiftTermEngine(shellIntegration: blocks)
         let session = TerminalSession(id: id, title: title, path: path, engine: engine, usesBlocks: blocks)
@@ -86,6 +87,7 @@ final class TerminalStore: ObservableObject {
         selectedID = id
         expanded = true
         engine.start(directory: path, command: command)
+        return id
     }
 
     @discardableResult

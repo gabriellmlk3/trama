@@ -84,6 +84,9 @@ struct EmptyStateView: View {
             .buttonStyle(EmberButton())
             .disabled(model.repos.isEmpty)
             if !model.repos.isEmpty {
+                if let proposal = model.proposal {
+                    HomeProposalCard(proposal: proposal)
+                }
                 HomeAgentBox()
             }
             if model.repos.isEmpty {

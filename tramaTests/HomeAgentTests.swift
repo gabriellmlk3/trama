@@ -7,7 +7,7 @@ final class HomeAgentTests: XCTestCase {
         XCTAssertFalse(prompt.contains("\n"))
         XCTAssertTrue(prompt.contains("ajustar login no api e no admin"))
         XCTAssertTrue(prompt.contains("\"/Applications/My Apps/Trama.app/Contents/MacOS/trama\" estado"))
-        XCTAssertTrue(prompt.contains("NÃO altere nada ainda"))
+        XCTAssertTrue(prompt.contains("NÃO crie nem altere nada"))
     }
 
     func testCommandKeepsLongPromptOutOfTheTerminalLine() throws {
