@@ -15,7 +15,7 @@
             <BuildableReference
                BuildableIdentifier = "primary"
                BlueprintIdentifier = "AAA0A5F5306D51F800B0FFCE"
-               BuildableName = "Trama.app"
+               BuildableName = "trama.app"
                BlueprintName = "trama"
                ReferencedContainer = "container:trama.xcodeproj">
             </BuildableReference>
@@ -26,7 +26,8 @@
       buildConfiguration = "Debug"
       selectedDebuggerIdentifier = "Xcode.DebuggerFoundation.Debugger.LLDB"
       selectedLauncherIdentifier = "Xcode.DebuggerFoundation.Launcher.LLDB"
-      shouldUseLaunchSchemeArgsEnv = "YES">
+      shouldUseLaunchSchemeArgsEnv = "YES"
+      codeCoverageEnabled = "NO">
       <Testables>
          <TestableReference
             skipped = "NO">
@@ -55,7 +56,7 @@
          <BuildableReference
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "AAA0A5F5306D51F800B0FFCE"
-            BuildableName = "Trama.app"
+            BuildableName = "trama.app"
             BlueprintName = "trama"
             ReferencedContainer = "container:trama.xcodeproj">
          </BuildableReference>
