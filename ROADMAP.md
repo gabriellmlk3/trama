@@ -130,3 +130,183 @@ Convenções do projeto: veja `CLAUDE.md`. Lógica nova vai em `trama/Motor/` (s
 - No tear, o fio da trama filha sai do fio da mãe.
 
 **Pronto quando** criar uma trama em cima de outra, e ela seguir certa depois que a mãe for integrada.
+
+---
+
+## 4. Terminal próprio
+
+Objetivo: desempenho, controle e aparência no terminal embutido, no estilo do Warp. Hoje o terminal é o SwiftTerm (`LocalProcessTerminalView`) usado em `State/TerminalSessions.swift` e `Screens/TerminalDrawer.swift`. A troca é gradual: cada fase deixa o app funcionando, e o motor só muda depois de validado contra gravações reais.
+
+Decisões: barra de entrada própria no lugar do prompt do shell; só zsh no início. Lógica em `trama/Engine/Terminal/` (só Foundation, com teste em `tramaTests/`); interface e renderizador em `trama/Screens/`.
+
+### 4.1 Isolar o terminal atrás de um protocolo
+
+**Problema.** `TerminalSession`, `TerminalStore` e `TerminalDrawer` conhecem o `LocalProcessTerminalView`, então trocar o motor mexe em tudo.
+
+**Como.**
+- Protocolo `TerminalEngine` (iniciar, enviar bytes, redimensionar, encerrar, entregar saída e eventos); o SwiftTerm fica atrás de uma implementação.
+- `TerminalSession` guarda o protocolo, não a view; o drawer pede a view ao motor.
+
+**Pronto quando** nenhum arquivo fora da implementação do SwiftTerm importa SwiftTerm e o terminal se comporta como antes.
+
+### 4.2 PTY próprio
+
+**Problema.** O `LocalProcess` do SwiftTerm é dono do PTY, então não dá para interceptar a entrada e a saída.
+
+**Como.**
+- `Engine/Terminal/PTY.swift`: `forkpty`/`posix_spawn`, leitura numa fila dedicada com buffers em lote, redimensionamento (`TIOCSWINSZ`), encerramento e código de saída.
+- O SwiftTerm passa a receber os bytes pelo `TerminalEngine`.
+
+**Pronto quando** as sessões abertas pelo app funcionam como antes, usando o PTY próprio, e a saída pode ser gravada e reproduzida.
+
+### 4.3 Integração com o zsh e blocos
+
+**Problema.** O app não sabe onde cada comando começa e termina, nem o diretório atual.
+
+**Como.**
+- `ZDOTDIR` temporário com um `.zshrc` que carrega o do usuário e acrescenta os hooks `precmd`/`preexec`, emitindo OSC 133 (A/B/C/D) e OSC 7.
+- Parser desses marcadores sobre o fluxo de bytes e modelo `TerminalBlock` (comando, saída, código de saída, duração, diretório).
+- Teste com um zsh real: os blocos de `ls`, de um comando que falha e de um multilinha.
+
+**Pronto quando** cada comando executado numa sessão gera um bloco com início, fim, código de saída e duração corretos.
+
+### 4.4 Spike da libghostty-vt
+
+**Problema.** Escrever parser e grade próprios é o trecho mais arriscado do plano; a `libghostty-vt` pode entregá-lo pronto.
+
+**Como.**
+- Confirmar no repositório o estado atual da API C e como obter um `.xcframework` (ou compilar com Zig).
+- Alimentar a biblioteca com os bytes gravados de sessões do Claude Code, vim e htop e ler a grade resultante.
+- Medir: tempo de build, tamanho do binário, vazão em `yes`/`cat` de arquivo grande, e cobertura do que o Claude Code usa (tela alternativa, mouse, bracketed paste, teclado estendido).
+- Registrar a decisão no commit/PR: adotar, ou seguir para 4.5.
+
+**Pronto quando** houver uma decisão escrita (adotar ou parser próprio) com os números do spike.
+
+### 4.5 Parser e grade (biblioteca ou próprios)
+
+**Problema.** O SwiftTerm limita desempenho e controle sobre a grade.
+
+**Como.**
+- Implementação de `TerminalEngine` sobre a `libghostty-vt` (se 4.4 aprovar) ou sobre um parser VT e uma grade próprios em `Engine/Terminal/`.
+- Rodar em paralelo ao SwiftTerm com a mesma suíte: vttest/esctest e as gravações de 4.4, comparando a grade célula a célula.
+- Reflow, Unicode largo, emoji, seleção e scrollback com testes próprios.
+
+**Pronto quando** a grade coincide com a do SwiftTerm em toda a suíte, ou as diferenças estão documentadas e aceitas.
+
+### 4.6 Renderizador Metal
+
+**Problema.** A view do SwiftTerm redesenha mais do que precisa.
+
+**Como.**
+- `Screens/Terminal/`: `MTKView` com atlas de glifos via CoreText, redesenhando só as linhas sujas; cursor, seleção e cores vindos de `Theme.swift`.
+- Entrada de teclado, mouse, colar com bracketed paste e arrastar arquivos.
+
+**Pronto quando** `yes` e `cat` de um arquivo grande rolam sem queda de quadros e com menos CPU que o SwiftTerm, na mesma máquina.
+
+### 4.7 Trocar o motor e remover o SwiftTerm
+
+**Problema.** Duas implementações em paralelo custam manutenção.
+
+**Como.**
+- Motor novo passa a ser o padrão; um ajuste temporário permite voltar ao SwiftTerm por uma versão.
+- Depois de um tempo de uso real, remover o pacote do `project.pbxproj` e o código antigo.
+
+**Pronto quando** o app roda sem a dependência do SwiftTerm e sem regressão nas sessões do dia a dia.
+
+### 4.8 Interface estilo Warp
+
+**Problema.** O terminal ainda parece um terminal comum e não conhece a trama.
+
+**Como.**
+- Linha do tempo de blocos (cabeçalho com comando, duração e status; copiar só a saída; recolher; pular entre blocos).
+- Barra de entrada própria em SwiftUI com edição multilinha, histórico e atalhos; envia a linha ao PTY e vira passagem direta quando um programa de tela cheia assume (tela alternativa).
+- Integração com o Trama: sessão ligada à trama e ao repositório, estado do agente (`Agents.swift`), enviar um bloco para a cápsula ou para os achados, abrir o arquivo citado num erro.
+- Reabrir as sessões da trama no mesmo diretório ao reiniciar o app.
+
+**Pronto quando** uma sessão de shell mostra blocos com a barra própria, o Claude Code roda em tela cheia sem a barra, e um bloco pode ser enviado para a cápsula com um clique.
+
+**Ordem.** 4.1 → 4.2 → 4.3 (o app já ganha status por comando); 4.8 pode começar depois de 4.3, em cima do SwiftTerm; 4.4 → 4.5 → 4.6 → 4.7 trocam o motor sem mexer na interface.
+
+---
+
+## 5. Time na rede
+
+Objetivo: os devs de um mesmo escritório verem o que os outros estão fazendo e serem avisados antes de um conflito. Tudo isso só existe quando há um servidor de time configurado; sem ele, nenhuma tela, comando ou hook muda.
+
+Decisões:
+- **Escopo.** 8 pessoas, presenciais, na mesma rede. Um único time por servidor. Só metadados (caminhos, estados, textos de handoff), nunca conteúdo de arquivo.
+- **Servidor.** O próprio executável do app, como `trama servidor`, num processo separado e desacoplado do app (arquivo de pid com `flock` em `~/.trama/servidor/`, um por Mac). Estado em SQLite. O host também é cliente, conectando em `localhost`. Mantém o Mac acordado enquanto houver conexões. Por ora o host é o Mac de uma pessoa; migrar para um host fixo não deve mudar o protocolo.
+- **Transporte.** Um único canal WebSocket (`NWListener` com `NWProtocolWebSocket` no servidor, `URLSessionWebSocketTask` no cliente), HTTP puro sem TLS na v1. Mensagens JSON com `id` e `type`; o cliente reconecta com backoff e manda `resume { since }` para receber o que perdeu. Porta fixa, 7447 por padrão.
+- **Descoberta.** Bonjour (`_trama._tcp`) só como catálogo, anunciando o nome do time e a versão do protocolo, nada mais. O app guarda o nome do servidor e o resolve de novo ao reconectar, com o último endereço conhecido e a digitação manual como fallback. Exige `NSLocalNetworkUsageDescription` e `NSBonjourServices`.
+- **Identidade.** Convite de uso único: `trama time entrar <endereço> <código>` devolve um token por pessoa, guardado no Keychain (o servidor guarda só o hash). Nome de exibição vindo de `git config user.name`. `trama time remover <nome>` revoga.
+- **Versões.** Número de `protocol` no handshake; o servidor aceita o protocolo atual e o anterior e responde com erro claro ("atualize o Trama"). Campos novos só aditivos, campos desconhecidos ignorados.
+- **Repositório.** Chave `repoKey` = URL do `origin` normalizada (sem protocolo, usuário nem `.git`; SSH e HTTPS equivalem). Repo sem `origin` não participa. Colisão só dentro da mesma `repoKey` e da mesma base.
+
+### 5.0 Spike do transporte
+
+**Problema.** A hipótese de uma única porta só com WebSocket (sem HTTP puro) e com token no header do handshake ainda não foi confirmada.
+
+**Como.**
+- Protótipo descartável: `NWListener` com `NWProtocolWebSocket`, autenticação no handshake, cliente com `URLSessionWebSocketTask`, queda e reconexão.
+- Se não servir, o plano cai para HTTP com polling por cursor (`GET /v1/changes?since=`), mantendo o mesmo modelo de mensagens.
+
+**Pronto quando** dois processos conversam por WebSocket autenticado e o cliente retoma depois de uma queda do servidor.
+
+### 5.1 Servidor, convite e conexão
+
+**Problema.** Não há onde as máquinas se encontrem.
+
+**Como.**
+- `trama/Engine/Team/` (só Foundation e Network): servidor, cliente, protocolo, armazenamento SQLite, anúncio e busca por Bonjour.
+- Comandos em `Engine/CLICommands.swift`: `trama servidor`, `trama time criar|entrar|sair|remover|status`.
+- Preferências ▸ "Time (opcional)": conectar, hospedar (liga e desliga o processo), copiar convite, mostrar estado lendo o pid e tentando a porta.
+- Indicador discreto na barra quando o time está configurado mas offline ou incompatível. Sem time configurado, não aparece nada.
+
+**Pronto quando** uma segunda máquina entra com o convite, reconecta sozinha depois de o host reiniciar e mostra "versão incompatível" quando o protocolo difere.
+
+### 5.2 Presença e aviso de colisão
+
+**Problema.** Dois devs mexem no mesmo arquivo sem saber, e o conflito só aparece no merge.
+
+**Como.**
+- Cada Trama publica, por repo de cada trama compartilhada: `repoKey`, base, estado (ativa, estacionada), agentes, e a lista de caminhos alterados em relação à base (commits locais, working tree e arquivos que o agente editou; a lista nasce de `Git.statusLines`).
+- O hook `PostToolUse` já instalado registra o arquivo editado pelo agente no estado local; o app (ou o processo do CLI) publica no ciclo seguinte, então o hook nunca depende do servidor.
+- Interruptor "compartilhar com o time" por trama, ligado por padrão; trama privada não publica, não gera nem recebe aviso.
+- Validade: retratação imediata ao arquivar, apagar ou desligar o compartilhamento; offline não apaga; estacionada conta, com rótulo; expira após 7 dias sem atualização (configurável no servidor).
+- Dois níveis: **ativa** (o outro está online e mexeu há pouco: notificação do sistema) e **latente** (offline, estacionado ou parado: só a linha na trama).
+- Interface: linha de aviso no repo dentro de `TramaDetail` ("Ana também altera 2 arquivos") com a lista de arquivos, pessoa, trama e quando. Também entra em `trama achados`.
+
+**Pronto quando** duas máquinas com o mesmo `origin` e a mesma base editam o mesmo arquivo e ambas veem o aviso em até alguns segundos, e a Ana fechar o app mantém o aviso como latente.
+
+### 5.3 Aviso ao agente
+
+**Problema.** Quem está editando naquele momento é o agente, e ele não sabe da colisão.
+
+**Como.**
+- O hook devolve `additionalContext` curto, em português e marcado como informativo ("Ana, na trama `x`, também está alterando `Arquivo.kt`. Evite refatorar esse arquivo ou avise antes").
+- Um aviso por arquivo por sessão, nunca bloqueia a edição, e fica em silêncio enquanto o servidor estiver offline (o aviso poderia estar velho).
+
+**Pronto quando** um agente que edita um arquivo já alterado por outra pessoa recebe o aviso uma única vez na sessão.
+
+### 5.4 Aba "Time" e handoff entre pessoas
+
+**Problema.** Não há como ver quem está em quê nem passar trabalho para outra pessoa.
+
+**Como.**
+- Aba "Time" na barra lateral: pessoas com online/offline e última atividade, tramas ativas, repos, estado dos agentes, e a caixa de entrada com badge de não lidos.
+- `trama handoff <repo> "texto" --para <pessoa>`: o handoff vai para a caixa pessoal no servidor, roteado por `repoKey`, com remetente e, opcionalmente, trama e branch de origem. Qualquer agente da pessoa que abrir sessão num repo com a mesma `repoKey` o recebe no contexto até ela marcar como lido. Não escreve na cápsula de ninguém.
+- Fila local para handoffs enviados offline, entregues ao reconectar (é a única coisa que persiste localmente).
+- Notificação do sistema só para colisão ativa e handoff recebido; nada de notificar presença.
+- Fora do escopo: chat, histórico de atividade, quadro do time.
+
+**Pronto quando** a Ana recebe, com o app fechado ao enviar, um handoff endereçado a ela assim que reconectar, e o agente dela o lê ao abrir uma sessão no repo indicado.
+
+### Riscos
+
+- O host é o Mac de uma pessoa: quando ele dorme ou o servidor para, o ao vivo some (o histórico fica no SQLite).
+- Versões diferentes do app: se o host atualiza o protocolo antes dos outros, todos caem até atualizarem.
+- `NWProtocolWebSocket` no servidor pode não permitir o desenho de porta única (ver 5.0).
+- O macOS pede a permissão de Rede Local na primeira busca por Bonjour; negar quebra a descoberta (o fallback manual continua valendo).
+- Processo servidor órfão se o pid se perder; o estado é checado também tentando a porta.
+
+**Ordem.** 5.0 → 5.1 → 5.2 → 5.3 → 5.4. Fora desta seção: ligar com "Vestir a trama de outra máquina" (3.2), TLS, LaunchAgent para iniciar no login e a extensão do VS Code.
