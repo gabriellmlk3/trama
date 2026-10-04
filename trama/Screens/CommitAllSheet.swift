@@ -4,18 +4,22 @@ struct CommitAllSheet: View {
     @EnvironmentObject var model: AppModel
     @Environment(\.dismiss) private var dismiss
     let trama: LiveTrama
-    @State private var messages: [String: String] = [:]
-    @State private var generating: Set<String> = []
 
     var dirty: [RepoStatus] {
         trama.status.filter { $0.exists && $0.changed > 0 && $0.conflict == nil }
     }
 
     var ready: [String: String] {
-        messages.compactMapValues { text in
-            let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-            return trimmed.isEmpty ? nil : trimmed
-        }.filter { key, _ in dirty.contains(where: { $0.repo == key }) }
+        var result: [String: String] = [:]
+        for status in dirty {
+            let trimmed = model.commitDraft(trama.slug, status.repo).wrappedValue.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmed.isEmpty { result[status.repo] = trimmed }
+        }
+        return result
+    }
+
+    var generatingAny: Bool {
+        dirty.contains { model.isGeneratingCommit(trama.slug, $0.repo) }
     }
 
     var body: some View {
@@ -46,7 +50,7 @@ struct CommitAllSheet: View {
                                         .font(.system(size: 11.5))
                                         .foregroundStyle(Theme.faded)
                                 }
-                                TextField("Mensagem do commit", text: binding(status.repo), axis: .vertical)
+                                TextField("Mensagem do commit", text: model.commitDraft(trama.slug, status.repo), axis: .vertical)
                                     .textFieldStyle(.plain)
                                     .font(.system(size: 12.5))
                                     .lineLimit(1...4)
@@ -61,14 +65,14 @@ struct CommitAllSheet: View {
             }
             HStack {
                 Button {
-                    for status in dirty where (messages[status.repo] ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    for status in dirty where model.commitDraft(trama.slug, status.repo).wrappedValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                         generate(status.repo)
                     }
                 } label: {
                     Label("Gerar mensagens", systemImage: "sparkles")
                 }
                 .buttonStyle(GhostButton(compact: true))
-                .disabled(dirty.isEmpty || !generating.isEmpty)
+                .disabled(dirty.isEmpty || generatingAny)
                 Spacer()
                 Button("Cancelar") { dismiss() }
                     .buttonStyle(GhostButton(compact: true))
@@ -93,7 +97,7 @@ struct CommitAllSheet: View {
         Button {
             generate(repo)
         } label: {
-            if generating.contains(repo) {
+            if model.isGeneratingCommit(trama.slug, repo) {
                 ProgressView().controlSize(.mini)
             } else {
                 Label("Gerar", systemImage: "sparkles")
@@ -102,22 +106,12 @@ struct CommitAllSheet: View {
         .buttonStyle(.plain)
         .font(.system(size: 11.5))
         .foregroundStyle(Theme.text3)
-        .disabled(generating.contains(repo))
+        .disabled(model.isGeneratingCommit(trama.slug, repo))
         .help("Gerar a mensagem com o Claude")
     }
 
     func generate(_ repo: String) {
-        guard !generating.contains(repo) else { return }
-        generating.insert(repo)
-        Task {
-            if let message = await model.suggestCommitMessage(trama.slug, repo: repo) {
-                messages[repo] = message
-            }
-            generating.remove(repo)
-        }
-    }
-
-    func binding(_ repo: String) -> Binding<String> {
-        Binding(get: { messages[repo] ?? "" }, set: { messages[repo] = $0 })
+        let slug = trama.slug
+        Task { await model.generateCommitMessage(slug, repo: repo) }
     }
 }

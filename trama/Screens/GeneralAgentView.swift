@@ -32,7 +32,10 @@ struct GeneralAgentView<Hero: View>: View {
     }
 
     private var inputBar: some View {
-        AgentInputBar(draft: $draft, running: session.running, focused: $focused, attachmentsDir: session.attachmentsDir, onSend: send, onStop: { session.stop() }, onReset: items.isEmpty ? nil : { session.reset() })
+        VStack(spacing: 6) {
+            AgentStatusLine(session: session)
+            AgentInputBar(draft: $draft, running: session.running, focused: $focused, attachmentsDir: session.attachmentsDir, onSend: send, onStop: { session.stop() }, onReset: items.isEmpty ? nil : { session.reset() })
+        }
     }
 
     private func send(_ attachments: [AgentAttachment]) {
@@ -165,6 +168,59 @@ private struct AgentWorking: View {
                 .font(.system(size: 12))
                 .foregroundStyle(Theme.faded)
         }
+    }
+}
+
+struct AgentStatusLine: View {
+    @ObservedObject var session: GeneralAgentSession
+
+    var body: some View {
+        let fraction = session.conversation.contextFraction
+        HStack(spacing: 8) {
+            Menu {
+                ForEach(AgentModel.all) { option in
+                    Button {
+                        session.model = option
+                    } label: {
+                        if option == session.model {
+                            Label("\(option.label) · \(option.detail)", systemImage: "checkmark")
+                        } else {
+                            Text("\(option.label) · \(option.detail)")
+                        }
+                    }
+                }
+            } label: {
+                Label(session.model.label, systemImage: "cpu")
+                    .font(Theme.mono(10.5))
+            }
+            .menuStyle(.borderlessButton)
+            .fixedSize()
+            .help("Modelo desta conversa. A troca vale a partir da próxima mensagem.")
+            Spacer()
+            if let usage = session.conversation.usageLabel {
+                Text(usage)
+                    .font(Theme.mono(10.5))
+                    .foregroundStyle(fraction > 0.8 ? Theme.waitText : Theme.faded)
+                ZStack {
+                    Circle().stroke(Theme.line2, lineWidth: 2.5)
+                    Circle()
+                        .trim(from: 0, to: fraction)
+                        .stroke(fraction > 0.8 ? Theme.wait : Theme.ember, style: StrokeStyle(lineWidth: 2.5, lineCap: .round))
+                        .rotationEffect(.degrees(-90))
+                }
+                .frame(width: 14, height: 14)
+                .help("Quanto da janela de contexto a conversa já ocupa. Perto de 100% o Claude compacta o histórico.")
+                if fraction > 0.6 {
+                    Button("Compactar") { session.compact() }
+                        .buttonStyle(.plain)
+                        .font(Theme.mono(10.5))
+                        .foregroundStyle(fraction > 0.8 ? Theme.waitText : Theme.text3)
+                        .disabled(!session.canCompact)
+                        .help("Resume o histórico para liberar a janela de contexto (/compact)")
+                }
+            }
+        }
+        .foregroundStyle(Theme.faded)
     }
 }
 

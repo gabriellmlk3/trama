@@ -630,8 +630,8 @@ struct CommitPanel: View {
     let merging: Bool
     let changes: [FileChange]
     @Binding var unchecked: Set<String>
-    @State private var message = ""
-    @State private var generating = false
+    private var message: String { model.commitDraft(trama.slug, repo).wrappedValue }
+    private var generating: Bool { model.isGeneratingCommit(trama.slug, repo) }
 
     var chosen: [String] { changes.map(\.id).filter { !unchecked.contains($0) } }
     var canCommit: Bool {
@@ -642,7 +642,7 @@ struct CommitPanel: View {
     var body: some View {
         GitCard {
             VStack(alignment: .leading, spacing: 10) {
-                TextField("Mensagem do commit", text: $message, axis: .vertical)
+                TextField("Mensagem do commit", text: model.commitDraft(trama.slug, repo), axis: .vertical)
                     .textFieldStyle(.plain)
                     .font(.system(size: 12.5))
                     .lineLimit(1...5)
@@ -673,7 +673,7 @@ struct CommitPanel: View {
                         let text = message
                         Task {
                             if await model.commit(trama.slug, repo: repo, paths: paths, message: text) {
-                                message = ""
+                                model.commitDraft(trama.slug, repo).wrappedValue = ""
                                 unchecked = []
                             }
                         }
@@ -691,13 +691,9 @@ struct CommitPanel: View {
 
     func generate() {
         guard !generating else { return }
-        generating = true
         let paths = chosen
-        Task {
-            if let suggestion = await model.suggestCommitMessage(trama.slug, repo: repo, paths: paths) {
-                message = suggestion
-            }
-            generating = false
-        }
+        let slug = trama.slug
+        let repo = repo
+        Task { await model.generateCommitMessage(slug, repo: repo, paths: paths) }
     }
 }

@@ -1,17 +1,16 @@
 import Foundation
 
 enum AgentUsage {
+    static let defaultWindow = 200_000
     private static let locale = Locale(identifier: "pt_BR")
 
-    static func label(cost: Double, tokens: Int) -> String? {
-        var parts: [String] = []
-        if cost > 0 { parts.append(money(cost)) }
-        if tokens > 0 { parts.append("\(compact(tokens)) tokens") }
-        return parts.isEmpty ? nil : parts.joined(separator: " · ")
+    static func percent(used: Int, window: Int) -> Int {
+        Int((Double(used) / Double(max(window, 1)) * 100).rounded())
     }
 
-    static func money(_ value: Double) -> String {
-        value.formatted(.currency(code: "USD").locale(locale).precision(.fractionLength(value < 0.01 ? 4 : 2)))
+    static func label(used: Int, window: Int) -> String? {
+        guard used > 0 else { return nil }
+        return "Contexto \(percent(used: used, window: window))% · \(compact(used)) de \(compact(window))"
     }
 
     static func compact(_ tokens: Int) -> String {

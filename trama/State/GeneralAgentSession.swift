@@ -13,6 +13,9 @@ final class GeneralAgentSession: ObservableObject {
     private(set) var grants: AgentGrants
     private var resumeID: String?
     @Published private(set) var conversation = AgentConversation()
+    @Published var model = AgentModel.saved {
+        didSet { UserDefaults.standard.set(model.id, forKey: AgentModel.storageKey) }
+    }
     @Published private(set) var running = false
     @Published private(set) var pendingPermissions: [AgentDenial] = []
     private var parser = AgentStreamParser()
@@ -113,6 +116,13 @@ final class GeneralAgentSession: ObservableObject {
         continueAfterDecision()
     }
 
+    var canCompact: Bool { !running && conversation.sessionID != nil && conversation.contextTokens > 0 }
+
+    func compact() {
+        guard canCompact else { return }
+        send("/compact")
+    }
+
     var canRemember: Bool { onRemember != nil }
 
     func allowAlways(_ denial: AgentDenial) {
@@ -144,7 +154,8 @@ final class GeneralAgentSession: ObservableObject {
             role: role,
             sessionID: conversation.sessionID ?? resumeID,
             extraTools: grants.rules + sessionRules + onceRules,
-            directories: extraDirs + grants.directories + sessionDirs + [attachmentsDir].compactMap { $0 }
+            directories: extraDirs + grants.directories + sessionDirs + [attachmentsDir].compactMap { $0 },
+            model: model.argument
         )
     }
 

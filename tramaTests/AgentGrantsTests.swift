@@ -23,17 +23,6 @@ final class AgentGrantsTests: XCTestCase {
         XCTAssertNil(try Workspace.open(root: w.root).config.agentGrants["melhorias"])
     }
 
-    func testResultCarriesTokenUsageAndLabelFormatsIt() {
-        var parser = AgentStreamParser()
-        let line = #"{"type":"result","is_error":false,"total_cost_usd":0.1234,"permission_denials":[],"usage":{"input_tokens":10,"cache_creation_input_tokens":5,"cache_read_input_tokens":985,"output_tokens":2500}}"#
-        var conversation = AgentConversation()
-        for event in parser.parse(line) { conversation.apply(event) }
-        XCTAssertEqual(conversation.inputTokens, 1000)
-        XCTAssertEqual(conversation.outputTokens, 2500)
-        XCTAssertEqual(conversation.usageLabel, "US$ 0,12 · 3,5 mil tokens")
-        XCTAssertNil(AgentConversation().usageLabel)
-    }
-
     func testTrashedConversationCanBeRestored() throws {
         let lab = try Lab()
         defer { lab.cleanup() }

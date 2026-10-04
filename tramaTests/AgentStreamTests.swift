@@ -48,7 +48,25 @@ final class AgentStreamTests: XCTestCase {
         XCTAssertEqual(c.items[1].text, "O backlog do Trama.")
         XCTAssertFalse(c.items[1].isLive)
         XCTAssertEqual(c.sessionID, "s1")
-        XCTAssertEqual(c.costUSD, 0.1, accuracy: 0.0001)
+    }
+
+    func testCompactBoundaryResetsContextAndLeavesANotice() {
+        let withUsage = #"{"type":"assistant","message":{"id":"m3","role":"assistant","content":[{"type":"text","text":"ok"}],"usage":{"input_tokens":150000,"output_tokens":10}}}"#
+        let boundary = #"{"type":"system","subtype":"compact_boundary","compact_metadata":{"trigger":"manual","pre_tokens":150010,"post_tokens":9000}}"#
+        let c = conversation([withUsage, boundary])
+        XCTAssertEqual(c.contextTokens, 9_000)
+        XCTAssertEqual(c.items.last?.kind, .notice)
+    }
+
+    func testContextUsageComesFromTheLastAssistantMessageAndModelWindow() {
+        let withUsage = #"{"type":"assistant","message":{"id":"m3","role":"assistant","content":[{"type":"text","text":"ok"}],"usage":{"input_tokens":10,"cache_creation_input_tokens":5,"cache_read_input_tokens":84985,"output_tokens":100}}}"#
+        let done = #"{"type":"result","is_error":false,"result":"ok","permission_denials":[],"modelUsage":{"claude-opus":{"contextWindow":1000000}}}"#
+        var c = conversation([withUsage])
+        XCTAssertEqual(c.contextTokens, 85_100)
+        XCTAssertEqual(c.usageLabel, "Contexto 43% · 85,1 mil de 200 mil")
+        c = conversation([withUsage, done])
+        XCTAssertEqual(c.usageLabel, "Contexto 9% · 85,1 mil de 1 mi")
+        XCTAssertNil(AgentConversation().usageLabel)
     }
 
     func testPartialTextStaysLiveUntilTheFinalMessage() {

@@ -3,6 +3,7 @@ import SwiftUI
 
 struct ContentView: View {
     @EnvironmentObject var model: AppModel
+    @Environment(\.openWindow) private var openWindow
 
     var body: some View {
         Group {
@@ -30,8 +31,8 @@ struct ContentView: View {
             NewTramaView()
                 .environmentObject(model)
         }
-        .sheet(item: $model.agentDialog) { t in
-            TramaAgentDialog(slug: t.slug)
+        .onChange(of: model.agentDialogToken) { _, _ in
+            openWindow(id: "agente")
         }
         .sheet(isPresented: $model.showingOnboarding) {
             OnboardingView()

@@ -40,6 +40,9 @@ final class AppModel: ObservableObject {
     @Published var proposal: Proposal?
     @Published var homeShowsConversation = false
     @Published var agentDialog: LiveTrama?
+    @Published var agentDialogToken = 0
+    @Published private(set) var commitDrafts: [String: String] = [:]
+    @Published private(set) var commitGenerating: Set<String> = []
     private var tramaAgents: [String: GeneralAgentSession] = [:]
     private var agentWatchers: [String: AnyCancellable] = [:]
     @Published private(set) var busyAgents: Set<String> = []
@@ -537,6 +540,28 @@ final class AppModel: ObservableObject {
         await perform(success: "Commit feito em \(repo)") { _ = try $0.commitChanges(slug, repo: repo, paths: paths, message: message) }
     }
 
+    func commitDraftKey(_ slug: String, _ repo: String) -> String {
+        "\(slug)/\(repo)"
+    }
+
+    func commitDraft(_ slug: String, _ repo: String) -> Binding<String> {
+        let key = commitDraftKey(slug, repo)
+        return Binding(get: { self.commitDrafts[key] ?? "" }, set: { self.commitDrafts[key] = $0 })
+    }
+
+    func isGeneratingCommit(_ slug: String, _ repo: String) -> Bool {
+        commitGenerating.contains(commitDraftKey(slug, repo))
+    }
+
+    func generateCommitMessage(_ slug: String, repo: String, paths: [String]? = nil) async {
+        let key = commitDraftKey(slug, repo)
+        guard commitGenerating.insert(key).inserted else { return }
+        defer { commitGenerating.remove(key) }
+        if let suggestion = await suggestCommitMessage(slug, repo: repo, paths: paths) {
+            commitDrafts[key] = suggestion
+        }
+    }
+
     func suggestCommitMessage(_ slug: String, repo: String, paths: [String]? = nil) async -> String? {
         do {
             return try await Core.run { try $0.suggestCommitMessage(slug, repo: repo, paths: paths) }
@@ -557,6 +582,7 @@ final class AppModel: ObservableObject {
             return false
         }
         await refresh()
+        for repo in messages.keys where failures[repo] == nil { commitDrafts.removeValue(forKey: commitDraftKey(slug, repo)) }
         if failures.isEmpty {
             showNotice("\(messages.count) \(plural(messages.count, "commit feito", "commits feitos"))")
             return true
@@ -744,6 +770,7 @@ final class AppModel: ObservableObject {
             agentDialogDirect = key != nil && (repo != nil || lastAgentScope[t.slug] != nil)
         }
         agentDialog = t
+        agentDialogToken += 1
     }
 
     func rememberAgent(slug: String, repo: String?, key: String?) {

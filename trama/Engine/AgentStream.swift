@@ -40,11 +40,9 @@ struct AgentDenial: Equatable, Hashable {
 struct AgentResult: Equatable {
     var isError: Bool
     var message: String?
-    var costUSD: Double?
     var durationMS: Int?
     var denials: [AgentDenial]
-    var inputTokens: Int?
-    var outputTokens: Int?
+    var contextWindow: Int?
 
     var deniedTools: [String] { denials.map(\.summary) }
 }
@@ -52,8 +50,9 @@ struct AgentResult: Equatable {
 enum AgentCLI {
     static let baseTools = ["Read", "Grep", "Glob", "Bash(trama *)", "Bash(git status*)", "Bash(git diff*)", "Bash(git log*)"]
 
-    static func arguments(role: String, sessionID: String?, extraTools: [String], directories: [String]) -> [String] {
+    static func arguments(role: String, sessionID: String?, extraTools: [String], directories: [String], model: String? = nil) -> [String] {
         var args = ["-p", "--output-format", "stream-json", "--verbose", "--include-partial-messages", "--permission-mode", "acceptEdits"]
+        if let model, !model.isEmpty { args += ["--model", model] }
         args += ["--allowedTools"] + baseTools + extraTools
         args += ["--append-system-prompt", role]
         if let sessionID { args += ["--resume", sessionID] }
@@ -67,6 +66,8 @@ enum AgentEvent: Equatable {
     case textDelta(messageID: String, text: String)
     case message(id: String, blocks: [AgentBlock])
     case toolResult(toolUseID: String, text: String, isError: Bool)
+    case context(tokens: Int)
+    case compacted(tokens: Int)
     case finished(AgentResult)
 }
 
@@ -80,8 +81,16 @@ struct AgentStreamParser {
         if let parent = object["parent_tool_use_id"] as? String, !parent.isEmpty { return [] }
         switch type {
         case "system":
-            guard object["subtype"] as? String == "init", let id = object["session_id"] as? String else { return [] }
-            return [.started(sessionID: id, model: object["model"] as? String ?? "")]
+            switch object["subtype"] as? String {
+            case "init":
+                guard let id = object["session_id"] as? String else { return [] }
+                return [.started(sessionID: id, model: object["model"] as? String ?? "")]
+            case "compact_boundary":
+                let metadata = object["compact_metadata"] as? [String: Any]
+                return [.compacted(tokens: metadata?["post_tokens"] as? Int ?? 0)]
+            default:
+                return []
+            }
         case "stream_event":
             return parseStream(object["event"] as? [String: Any] ?? [:])
         case "assistant":
@@ -125,7 +134,14 @@ struct AgentStreamParser {
                 return nil
             }
         }
-        return blocks.isEmpty ? [] : [.message(id: id, blocks: blocks)]
+        var events: [AgentEvent] = []
+        if !blocks.isEmpty { events.append(.message(id: id, blocks: blocks)) }
+        if let usage = message["usage"] as? [String: Any] {
+            let keys = ["input_tokens", "cache_creation_input_tokens", "cache_read_input_tokens", "output_tokens"]
+            let total = keys.reduce(0) { $0 + (usage[$1] as? Int ?? 0) }
+            if total > 0 { events.append(.context(tokens: total)) }
+        }
+        return events
     }
 
     private func parseUser(_ message: [String: Any]) -> [AgentEvent] {
@@ -141,16 +157,14 @@ struct AgentStreamParser {
             guard let name = denial["tool_name"] as? String else { return nil }
             return AgentDenial(tool: name, input: denial["tool_input"] as? [String: Any] ?? [:])
         }
-        let usage = object["usage"] as? [String: Any]
-        let inputKeys = ["input_tokens", "cache_creation_input_tokens", "cache_read_input_tokens"]
+        let models = object["modelUsage"] as? [String: Any] ?? [:]
+        let window = models.values.compactMap { ($0 as? [String: Any])?["contextWindow"] as? Int }.max()
         return AgentResult(
             isError: object["is_error"] as? Bool ?? false,
             message: object["result"] as? String,
-            costUSD: object["total_cost_usd"] as? Double,
             durationMS: object["duration_ms"] as? Int,
             denials: denials,
-            inputTokens: usage.map { usage in inputKeys.reduce(0) { $0 + (usage[$1] as? Int ?? 0) } },
-            outputTokens: usage?["output_tokens"] as? Int
+            contextWindow: window
         )
     }
 
@@ -195,13 +209,16 @@ struct AgentConversation: Equatable {
     private(set) var items: [AgentItem] = []
     private(set) var sessionID: String?
     private(set) var model: String?
-    private(set) var costUSD: Double = 0
-    private(set) var inputTokens = 0
-    private(set) var outputTokens = 0
+    private(set) var contextTokens = 0
+    private(set) var contextWindow = AgentUsage.defaultWindow
     private var nextID = 0
 
+    var contextFraction: Double {
+        min(1, Double(contextTokens) / Double(max(contextWindow, 1)))
+    }
+
     var usageLabel: String? {
-        AgentUsage.label(cost: costUSD, tokens: inputTokens + outputTokens)
+        AgentUsage.label(used: contextTokens, window: contextWindow)
     }
 
     mutating func addUser(_ text: String, attachments: [String] = []) {
@@ -242,11 +259,14 @@ struct AgentConversation: Equatable {
             guard let index = items.firstIndex(where: { $0.toolUseID == toolUseID }) else { return }
             items[index].result = text
             items[index].resultIsError = isError
+        case .context(let tokens):
+            contextTokens = tokens
+        case .compacted(let tokens):
+            contextTokens = tokens
+            addNotice("Conversa compactada · o histórico foi resumido para liberar contexto.")
         case .finished(let result):
             closeLiveText()
-            costUSD += result.costUSD ?? 0
-            inputTokens += result.inputTokens ?? 0
-            outputTokens += result.outputTokens ?? 0
+            if let window = result.contextWindow, window > 0 { contextWindow = window }
             if result.isError { addError(result.message ?? "O Claude terminou com erro.") }
             if !result.deniedTools.isEmpty {
                 let names = Array(Set(result.deniedTools)).sorted().joined(separator: ", ")

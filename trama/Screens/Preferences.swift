@@ -11,6 +11,7 @@ struct PreferencesView: View {
     @State private var grants: [String: AgentGrants] = [:]
     @AppStorage(ClaudeTarget.storageKey) private var claudeTarget = ClaudeTarget.docked.rawValue
     @AppStorage(AgentScope.storageKey) private var agentScope = AgentScope.single.rawValue
+    @AppStorage(AgentModel.storageKey) private var agentModel = ""
     @State private var editingRecipe: RepoConfig?
     @State private var toolVersions: [String: String?] = [:]
     @State private var credentials = GitCredentials.all()
@@ -35,6 +36,9 @@ struct PreferencesView: View {
                     ForEach(AgentScope.allCases) { Text($0.label).tag($0.rawValue) }
                 }
                 .pickerStyle(.segmented)
+                Picker("Modelo para novas conversas", selection: $agentModel) {
+                    ForEach(AgentModel.all) { Text($0.label).tag($0.id) }
+                }
             } footer: {
                 Text("Agent acoplado abre uma janela no app, com a conversa e a lista de sessões da trama (sempre um agent na raiz dela, com todos os repositórios). Console embutido e Claude Desktop abrem o Claude Code como antes; neles, “Ao abrir uma trama” define um agent para a trama (raiz, com todos os repositórios; no Desktop, só a pasta da trama) ou um por repositório. Vale para “Abrir agent”, “Revisar” e para abrir agentes ao criar uma trama.")
                     .font(.caption)

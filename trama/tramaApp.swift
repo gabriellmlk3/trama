@@ -78,6 +78,13 @@ struct TramaApp: App {
             }
         }
 
+        Window("Agent", id: "agente") {
+            AgentWindow()
+                .environmentObject(model)
+        }
+        .defaultSize(width: 760, height: 640)
+        .windowResizability(.contentMinSize)
+
         Settings {
             PreferencesView()
                 .environmentObject(model)

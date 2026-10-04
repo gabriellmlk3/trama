@@ -45,6 +45,11 @@ final class AgentPermissionTests: XCTestCase {
         XCTAssertEqual(args.firstIndex(of: "--resume").map { args[$0 + 1] }, "s1")
         XCTAssertEqual(args.filter { $0 == "--add-dir" }.count, 2)
         XCTAssertFalse(AgentCLI.arguments(role: "papel", sessionID: nil, extraTools: [], directories: []).contains("--resume"))
+        XCTAssertFalse(AgentCLI.arguments(role: "papel", sessionID: nil, extraTools: [], directories: [], model: AgentModel.standard.argument).contains("--model"))
+        let chosen = AgentCLI.arguments(role: "papel", sessionID: nil, extraTools: [], directories: [], model: "claude-opus-5-5")
+        XCTAssertEqual(chosen[chosen.firstIndex(of: "--model")! + 1], "claude-opus-5-5")
+        XCTAssertEqual(AgentModel.find("desconhecido").label, "desconhecido")
+        XCTAssertEqual(AgentModel.find(nil), AgentModel.standard)
     }
 
     func testRepoInstructionsScopeTheAgentToOneWorktree() {

@@ -1,5 +1,23 @@
 import SwiftUI
 
+struct AgentWindow: View {
+    @EnvironmentObject var model: AppModel
+
+    var body: some View {
+        Group {
+            if let slug = model.agentDialog?.slug {
+                TramaAgentDialog(slug: slug)
+                    .id(model.agentDialogToken)
+            } else {
+                Color.clear
+            }
+        }
+        .frame(minWidth: 560, minHeight: 420)
+        .background(Theme.background)
+        .onDisappear { model.agentDialog = nil }
+    }
+}
+
 struct TramaAgentDialog: View {
     @EnvironmentObject var model: AppModel
     @Environment(\.dismiss) private var dismiss
@@ -12,7 +30,25 @@ struct TramaAgentDialog: View {
     @State private var search = ""
     @State private var undo: [TrashedConversation] = []
     @State private var undoTitle = ""
+    @State private var searching = false
     @FocusState private var focused: Bool
+    @FocusState private var searchFocused: Bool
+
+    private var shortcuts: some View {
+        ZStack {
+            Button("Nova conversa") { start(resume: nil) }
+                .keyboardShortcut("n", modifiers: [.command, .shift])
+            Button("Buscar conversas") {
+                picking = true
+                searching = true
+                DispatchQueue.main.async { searchFocused = true }
+            }
+            .keyboardShortcut("k", modifiers: .command)
+        }
+        .opacity(0)
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+    }
 
     private var filteredPast: [ClaudeConversation] {
         let term = search.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -33,10 +69,11 @@ struct TramaAgentDialog: View {
                 chat(session)
             }
         }
-        .frame(width: 760, height: 640)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Theme.background)
         .foregroundStyle(Theme.text)
         .preferredColorScheme(.dark)
+        .background(shortcuts)
         .task(id: scope) { await loadPast() }
         .onAppear {
             scope = model.agentDialogRepo
@@ -112,7 +149,7 @@ struct TramaAgentDialog: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 8) {
                 if let trama, trama.repos.count > 1 { scopeChooser(trama) }
-                row(icon: "plus", title: "Nova conversa", subtitle: "Começa do zero, sem contexto anterior") {
+                row(icon: "plus", title: "Nova conversa", subtitle: "Começa do zero, sem contexto anterior · ⇧⌘N") {
                     start(resume: nil)
                 }
                 let live = model.liveAgents(slug, repo: scope)
@@ -132,7 +169,7 @@ struct TramaAgentDialog: View {
                 }
                 if !past.isEmpty {
                     sectionTitle("Sessões anteriores")
-                    if past.count > 5 { searchField }
+                    if past.count > 5 || searching { searchField }
                     ForEach(filteredPast) { conversation in
                         row(icon: "clock.arrow.circlepath", title: conversation.title,
                             subtitle: "\(scope ?? "raiz da trama") · \(conversation.modifiedAt.formatted(.relative(presentation: .named)))",
@@ -156,9 +193,10 @@ struct TramaAgentDialog: View {
             Image(systemName: "magnifyingglass")
                 .font(.system(size: 12))
                 .foregroundStyle(Theme.faded)
-            TextField("Buscar nas conversas", text: $search)
+            TextField("Buscar nas conversas · ⌘K", text: $search)
                 .textFieldStyle(.plain)
                 .font(.system(size: 13))
+                .focused($searchFocused)
         }
         .padding(.horizontal, 10)
         .frame(height: 32)
@@ -320,15 +358,9 @@ private struct ChatBody: View {
             } else {
                 AgentConversationList(session: session)
             }
-            if let usage = session.conversation.usageLabel {
-                Text("Esta conversa · \(usage)")
-                    .font(Theme.mono(10.5))
-                    .foregroundStyle(Theme.faded)
-                    .frame(maxWidth: .infinity, alignment: .trailing)
-                    .padding(.horizontal, 18)
-                    .padding(.top, 6)
-                    .help("Soma dos turnos desta sessão. Conversas retomadas contam só a partir da retomada.")
-            }
+            AgentStatusLine(session: session)
+                .padding(.horizontal, 18)
+                .padding(.top, 6)
             AgentInputBar(draft: $draft, running: session.running, focused: focused, attachmentsDir: session.attachmentsDir, onSend: send, onStop: { session.stop() }, onReset: nil)
                 .padding(.horizontal, 18)
                 .padding(.vertical, 14)
