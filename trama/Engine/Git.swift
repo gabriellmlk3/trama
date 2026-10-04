@@ -30,16 +30,6 @@ public struct GitError: Error, LocalizedError, CustomStringConvertible {
     public var errorDescription: String? { description }
 }
 
-struct GitResult {
-    var output: String
-    var error: String
-    var code: Int32
-}
-
-final class Box {
-    var data = Data()
-}
-
 enum Git {
     static var executable: String {
         if let v = ProcessInfo.processInfo.environment["TRAMA_GIT"], !v.isEmpty {
@@ -49,9 +39,6 @@ enum Git {
     }
 
     static func execute(_ dir: String, _ args: [String], timeout: TimeInterval = 0) -> GitResult {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: executable)
-        process.arguments = ["-C", dir] + args
         var env = ProcessInfo.processInfo.environment
         env["GIT_TERMINAL_PROMPT"] = "0"
         env["GIT_OPTIONAL_LOCKS"] = "0"
@@ -60,39 +47,11 @@ enum Git {
         if env["GIT_SSH_COMMAND"] == nil {
             env["GIT_SSH_COMMAND"] = "ssh -o BatchMode=yes"
         }
-        process.environment = env
-        let output = Pipe()
-        let error = Pipe()
-        process.standardOutput = output
-        process.standardError = error
-        process.standardInput = FileHandle.nullDevice
-        do {
-            try process.run()
-        } catch {
-            return GitResult(output: "", error: "não consegui executar o git (\(executable)): \(error.localizedDescription)", code: -1)
+        var result = ProcessRunner.run(executable, ["-C", dir] + args, environment: env, timeout: timeout)
+        if result.code == ProcessRunner.launchFailureCode && result.output.isEmpty {
+            result.error = "não consegui executar o git (\(executable)): \(result.error)"
         }
-        let errorBox = Box()
-        let group = DispatchGroup()
-        group.enter()
-        DispatchQueue.global(qos: .userInitiated).async {
-            errorBox.data = error.fileHandleForReading.readDataToEndOfFile()
-            group.leave()
-        }
-        var timer: DispatchWorkItem?
-        if timeout > 0 {
-            let item = DispatchWorkItem {
-                if process.isRunning { process.terminate() }
-            }
-            timer = item
-            DispatchQueue.global().asyncAfter(deadline: .now() + timeout, execute: item)
-        }
-        let data = output.fileHandleForReading.readDataToEndOfFile()
-        group.wait()
-        process.waitUntilExit()
-        timer?.cancel()
-        var text = String(decoding: data, as: UTF8.self)
-        while text.hasSuffix("\n") { text.removeLast() }
-        return GitResult(output: text, error: String(decoding: errorBox.data, as: UTF8.self), code: process.terminationStatus)
+        return result
     }
 
     @discardableResult

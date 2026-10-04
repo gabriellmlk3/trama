@@ -155,20 +155,13 @@ extension Workspace {
         cd "$TRAMA_WT" && /bin/zsh -ilc "$TRAMA_RECIPE" >> "$TRAMA_LOG" 2>&1
         if [ $? -eq 0 ]; then echo \(PrepState.ready) > "$TRAMA_STATE"; else echo \(PrepState.failed) > "$TRAMA_STATE"; fi
         """
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/bin/sh")
-        process.arguments = ["-c", script]
         var env = ProcessInfo.processInfo.environment
         env["TRAMA_WT"] = wt
         env["TRAMA_LOG"] = log
         env["TRAMA_STATE"] = statePath
         env["TRAMA_RECIPE"] = r.run.joined(separator: " && ")
-        process.environment = env
-        process.standardInput = FileHandle.nullDevice
-        process.standardOutput = FileHandle.nullDevice
-        process.standardError = FileHandle.nullDevice
         do {
-            try process.run()
+            try ProcessRunner.spawnDetached("/bin/sh", ["-c", script], environment: env)
         } catch {
             try? File.write(PrepState.failed + "\n", to: statePath)
             warnings.append(Warning(repo: r.name, message: "não consegui rodar o preparo: \(error.localizedDescription)"))

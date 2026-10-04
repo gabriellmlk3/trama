@@ -54,7 +54,9 @@ public enum AgentPullPolicy: String, Codable, Sendable {
 }
 
 public struct Config: Codable, Sendable {
-    public var version = 1
+    public static let currentVersion = 1
+
+    public var version = Config.currentVersion
     public var branchPrefix = "trama/"
     public var defaultBranch = "main"
     public var context: String?
@@ -71,7 +73,7 @@ public struct Config: Codable, Sendable {
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
-        version = try c.decodeIfPresent(Int.self, forKey: .version) ?? 1
+        version = try c.decodeIfPresent(Int.self, forKey: .version) ?? Config.currentVersion
         branchPrefix = try c.decodeIfPresent(String.self, forKey: .branchPrefix) ?? ""
         defaultBranch = try c.decodeIfPresent(String.self, forKey: .defaultBranch) ?? ""
         context = try c.decodeIfPresent(String.self, forKey: .context)
@@ -154,7 +156,24 @@ public struct Trama: Codable, Hashable, Identifiable, Sendable {
 }
 
 private struct TramasFile: Codable {
+    static let currentVersion = 1
+
+    var version = TramasFile.currentVersion
     var tramas: [Trama]
+
+    enum CodingKeys: String, CodingKey {
+        case version = "versao", tramas
+    }
+
+    init(tramas: [Trama]) {
+        self.tramas = tramas
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        version = try c.decodeIfPresent(Int.self, forKey: .version) ?? TramasFile.currentVersion
+        tramas = try c.decode([Trama].self, forKey: .tramas)
+    }
 }
 
 public final class Workspace {
@@ -208,12 +227,7 @@ public final class Workspace {
         guard let text = try File.read(path) else {
             throw TramaError.notInitialized
         }
-        do {
-            let config = try JSONDecoder().decode(Config.self, from: Data(text.utf8))
-            return Workspace(root: r, config: config)
-        } catch {
-            throw TramaError("config.json inválido (\(path)): \(error.localizedDescription)")
-        }
+        return Workspace(root: r, config: try decodeConfig(text, path: path))
     }
 
     @discardableResult
@@ -231,33 +245,67 @@ public final class Workspace {
             guard Paths.isDirectory(c) else {
                 throw TramaError("pasta de contexto não encontrada: \(c)")
             }
-            w.config.context = c
+            try w.updateConfig { $0.context = c }
+        } else {
+            try w.saveConfig()
         }
-        try w.saveConfig()
         return w
     }
 
     public func saveConfig() throws {
+        try withLock { try writeConfig() }
+    }
+
+    private func writeConfig() throws {
         let data = try JSON.encoder().encode(config)
         try File.write(data + Data("\n".utf8), to: configPath)
     }
 
+    private func reloadConfig() throws {
+        guard let text = try File.read(configPath) else { return }
+        config = try Workspace.decodeConfig(text, path: configPath)
+    }
+
+    @discardableResult
+    func updateConfig<T>(_ change: (inout Config) throws -> T) throws -> T {
+        try withLock {
+            try reloadConfig()
+            var updated = config
+            let result = try change(&updated)
+            config = updated
+            try writeConfig()
+            return result
+        }
+    }
+
+    static func decodeConfig(_ text: String, path: String) throws -> Config {
+        let config: Config
+        do {
+            config = try JSONDecoder().decode(Config.self, from: Data(text.utf8))
+        } catch {
+            throw TramaError("config.json inválido (\(path)): \(error.localizedDescription)")
+        }
+        guard config.version <= Config.currentVersion else {
+            throw TramaError("config.json é da versão \(config.version), mais nova que a \(Config.currentVersion) que este Trama entende · atualize o Trama")
+        }
+        return config
+    }
+
     func replaceRepo(_ r: RepoConfig) throws {
-        guard let i = config.repos.firstIndex(where: { $0.name == r.name }) else { return }
-        config.repos[i] = r
-        try saveConfig()
+        try updateConfig { config in
+            guard let i = config.repos.firstIndex(where: { $0.name == r.name }) else { return }
+            config.repos[i] = r
+        }
     }
 
     public func setDefaultBranch(_ branch: String) throws {
         let b = branch.trimmingCharacters(in: .whitespaces)
         guard !b.isEmpty else { throw TramaError("informe o nome da branch") }
-        config.defaultBranch = b
-        try saveConfig()
+        try updateConfig { $0.defaultBranch = b }
     }
 
     public func setAgentPullPolicy(_ policy: AgentPullPolicy) throws {
-        config.agentPullPolicy = policy
-        try saveConfig()
+        try updateConfig { $0.agentPullPolicy = policy }
     }
 
     public func repo(_ key: String) throws -> RepoConfig {
@@ -296,32 +344,33 @@ public final class Workspace {
             throw TramaError("\(Paths.abbreviate(a)) não é um repositório git")
         }
         let topPath = Paths.clean(top)
-        if let r = config.repos.first(where: { Paths.real($0.path) == Paths.real(topPath) }) {
-            throw TramaError("\(Paths.abbreviate(topPath)) já está cadastrado como “\(r.name)”")
-        }
         let name = Paths.name(topPath)
-        if config.repos.contains(where: { $0.name == name }) {
-            throw TramaError("já existe um repositório chamado “\(name)”")
-        }
-        var finalAlias = (alias?.isEmpty == false ? alias! : Workspace.deriveAlias(name))
-        if config.repos.contains(where: { $0.alias == finalAlias }) {
-            finalAlias = name
-        }
-        let finalBase = (base?.isEmpty == false ? base! : Git.probableBase(topPath))
         let suggestion = RecipeSuggestion.forRepo(topPath)
-        let r = RepoConfig(
-            name: name,
-            alias: finalAlias,
-            path: topPath,
-            label: label?.isEmpty == false ? label : nil,
-            base: finalBase,
-            copy: suggestion.copy,
-            run: suggestion.run
-        )
-        config.repos.append(r)
-        config.repos.sort { $0.name < $1.name }
-        try saveConfig()
-        return r
+        let finalBase = (base?.isEmpty == false ? base! : Git.probableBase(topPath))
+        return try updateConfig { config in
+            if let r = config.repos.first(where: { Paths.real($0.path) == Paths.real(topPath) }) {
+                throw TramaError("\(Paths.abbreviate(topPath)) já está cadastrado como “\(r.name)”")
+            }
+            if config.repos.contains(where: { $0.name == name }) {
+                throw TramaError("já existe um repositório chamado “\(name)”")
+            }
+            var finalAlias = (alias?.isEmpty == false ? alias! : Workspace.deriveAlias(name))
+            if config.repos.contains(where: { $0.alias == finalAlias }) {
+                finalAlias = name
+            }
+            let r = RepoConfig(
+                name: name,
+                alias: finalAlias,
+                path: topPath,
+                label: label?.isEmpty == false ? label : nil,
+                base: finalBase,
+                copy: suggestion.copy,
+                run: suggestion.run
+            )
+            config.repos.append(r)
+            config.repos.sort { $0.name < $1.name }
+            return r
+        }
     }
 
     @discardableResult
@@ -330,18 +379,22 @@ public final class Workspace {
         if let t = try tramas().first(where: { !$0.isArchived && $0.repos.contains(r.name) }) {
             throw TramaError("\(r.name) ainda faz parte da trama “\(t.slug)”")
         }
-        config.repos.removeAll { $0.name == r.name }
-        try saveConfig()
+        try updateConfig { $0.repos.removeAll { $0.name == r.name } }
         return r
     }
 
     public func tramas() throws -> [Trama] {
         guard let text = try File.read(tramasPath) else { return [] }
+        let file: TramasFile
         do {
-            return try JSONDecoder().decode(TramasFile.self, from: Data(text.utf8)).tramas
+            file = try JSONDecoder().decode(TramasFile.self, from: Data(text.utf8))
         } catch {
             throw TramaError("tramas.json inválido: \(error.localizedDescription)")
         }
+        guard file.version <= TramasFile.currentVersion else {
+            throw TramaError("tramas.json é da versão \(file.version), mais nova que a \(TramasFile.currentVersion) que este Trama entende · atualize o Trama")
+        }
+        return file.tramas
     }
 
     public func trama(_ slug: String) throws -> Trama {

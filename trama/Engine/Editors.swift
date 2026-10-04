@@ -44,16 +44,10 @@ enum EditorDetection {
     }
 
     static func launch(_ path: String, app: String) throws {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/open")
-        process.arguments = ["-a", app, path]
-        let error = Pipe()
-        process.standardError = error
-        try process.run()
-        process.waitUntilExit()
-        if process.terminationStatus != 0 {
-            let message = String(decoding: error.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
-            throw TramaError("não consegui abrir \(app): \(message.trimmingCharacters(in: .whitespacesAndNewlines))")
+        let result = ProcessRunner.run("/usr/bin/open", ["-a", app, path])
+        if result.code != 0 {
+            let message = result.error.trimmingCharacters(in: .whitespacesAndNewlines)
+            throw TramaError(message.isEmpty ? "não consegui abrir \(app)" : "não consegui abrir \(app): \(message)")
         }
     }
 

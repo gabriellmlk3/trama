@@ -70,15 +70,6 @@ enum ToolInstaller {
     }
 
     static func runInTerminal(_ command: String) -> Int32 {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/bin/zsh")
-        process.arguments = ["-lc", command]
-        do {
-            try process.run()
-        } catch {
-            return -1
-        }
-        process.waitUntilExit()
-        return process.terminationStatus
+        ProcessRunner.runInheritingOutput("/bin/zsh", ["-lc", command])
     }
 }

@@ -2,7 +2,7 @@
 
 Próximas funcionalidades, em ordem de prioridade dentro de cada grupo. Cada item cabe numa trama e numa sessão de agente: tem o problema, onde mexer no código e quando está pronto. A camada de IA (resumo ao retomar, revisor da trama, "ondas") fica para depois destes.
 
-Convenções do projeto: veja `CLAUDE.md`. Lógica nova vai em `trama/Motor/` (só Foundation, com teste em `tramaTests/`); interface em `trama/Telas/`.
+Convenções do projeto: veja `CLAUDE.md`. Lógica nova vai em `trama/Engine/` (só Foundation, com teste em `tramaTests/`); interface em `trama/Screens/`.
 
 ---
 
@@ -14,7 +14,7 @@ Convenções do projeto: veja `CLAUDE.md`. Lógica nova vai em `trama/Motor/` (s
 
 **Como.**
 - `RepoConfig` ganha uma receita: `copiar: [String]` (padrões de arquivo, ex.: `.env*`, `local.properties`) e `rodar: [String]` (comandos, ex.: `npm ci`).
-- Novo `Motor/Preparo.swift`: depois de `criarWorktree`, copia os arquivos da cópia principal e roda os comandos em segundo plano, com log em `<raiz>/.trama/logs/<trama>-<repo>.log`.
+- Novo `Engine/Preparation.swift`: depois de `createWorktree`, copia os arquivos da cópia principal e roda os comandos em segundo plano, com log em `<raiz>/.trama/logs/<trama>-<repo>.log`.
 - Sugestão automática ao cadastrar o repositório: lockfile do npm/pnpm/yarn → install correspondente; `Podfile` → `pod install`; `.env*` existentes → copiar.
 - Estado do preparo no tear: "preparando…", "pronto" ou "falhou", com link para o log.
 - Comando: `trama repo preparo api --copiar .env --rodar "npm ci"`.
@@ -40,7 +40,7 @@ Convenções do projeto: veja `CLAUDE.md`. Lógica nova vai em `trama/Motor/` (s
 **Problema.** Um agente fica parado esperando aprovação e ninguém vê.
 
 **Como.**
-- Em `ModeloApp.atualizar`, comparar o estado anterior e o novo de cada agente; nas transições para `aguardando` e `concluiu`, disparar uma notificação (`UserNotifications`).
+- Em `AppModel.refresh`, comparar o estado anterior e o novo de cada agente; nas transições para `aguardando` e `concluiu`, disparar uma notificação (`UserNotifications`).
 - Clicar na notificação abre a trama no app e traz o Terminal para frente.
 - No ícone da barra de menus, o número de agentes esperando por você.
 - Ajustes: ligar ou desligar cada tipo de aviso.

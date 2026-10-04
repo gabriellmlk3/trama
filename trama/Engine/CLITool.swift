@@ -21,40 +21,14 @@ struct CLITool: Sendable {
         guard let exe = executable else {
             return GitResult(output: "", error: missingMessage, code: -1)
         }
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: exe)
-        process.arguments = args
-        process.currentDirectoryURL = URL(fileURLWithPath: dir)
         var env = ProcessInfo.processInfo.environment
         for (key, value) in GitCredentials.cliEnvironment(tool: name) where env[key] == nil { env[key] = value }
         for (key, value) in environment { env[key] = value }
-        process.environment = env
-        let output = Pipe()
-        let error = Pipe()
-        process.standardOutput = output
-        process.standardError = error
-        process.standardInput = FileHandle.nullDevice
-        do {
-            try process.run()
-        } catch {
-            return GitResult(output: "", error: "não consegui executar o \(name): \(error.localizedDescription)", code: -1)
+        var result = ProcessRunner.run(exe, args, directory: dir, environment: env, timeout: timeout)
+        if result.code == ProcessRunner.launchFailureCode && result.output.isEmpty {
+            result.error = "não consegui executar o \(name): \(result.error)"
         }
-        let item = DispatchWorkItem { if process.isRunning { process.terminate() } }
-        DispatchQueue.global().asyncAfter(deadline: .now() + timeout, execute: item)
-        let errorBox = Box()
-        let group = DispatchGroup()
-        group.enter()
-        DispatchQueue.global(qos: .userInitiated).async {
-            errorBox.data = error.fileHandleForReading.readDataToEndOfFile()
-            group.leave()
-        }
-        let data = output.fileHandleForReading.readDataToEndOfFile()
-        group.wait()
-        process.waitUntilExit()
-        item.cancel()
-        var text = String(decoding: data, as: UTF8.self)
-        while text.hasSuffix("\n") { text.removeLast() }
-        return GitResult(output: text, error: String(decoding: errorBox.data, as: UTF8.self), code: process.terminationStatus)
+        return result
     }
 
     @discardableResult
