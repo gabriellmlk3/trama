@@ -5,3 +5,5 @@ DerivedData/
 build/
 .build/
 *.profraw
+context/tramas/
+tramas/
