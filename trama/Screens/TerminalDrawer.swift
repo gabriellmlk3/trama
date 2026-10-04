@@ -17,16 +17,18 @@ struct TerminalDrawer: View {
         if !store.sessions.isEmpty {
             VStack(spacing: 0) {
                 Rectangle().fill(Theme.line).frame(height: 1)
+                TerminalTabStrip(store: store)
+                if store.expanded, let session = store.selected {
+                    TerminalSessionView(session: session, height: store.height)
+                        .id(session.id)
+                }
+            }
+            .overlay(alignment: .top) {
                 if store.expanded {
                     ResizeHandle(height: Binding(
                         get: { store.height },
                         set: { store.height = $0 }
                     ))
-                }
-                TerminalTabStrip(store: store)
-                if store.expanded, let session = store.selected {
-                    TerminalSessionView(session: session, height: store.height)
-                        .id(session.id)
                 }
             }
         }
@@ -35,22 +37,30 @@ struct TerminalDrawer: View {
 
 struct ResizeHandle: View {
     @Binding var height: CGFloat
+    @State private var startHeight: CGFloat?
+    @State private var hovering = false
 
     var body: some View {
         Rectangle()
-            .fill(Color.clear)
-            .frame(height: 6)
+            .fill(hovering || startHeight != nil ? Theme.ember.opacity(0.6) : Color.clear)
+            .frame(height: hovering || startHeight != nil ? 3 : 1)
+            .frame(maxWidth: .infinity)
+            .frame(height: 10, alignment: .top)
             .contentShape(Rectangle())
             .onHover { inside in
+                guard inside != hovering else { return }
+                hovering = inside
                 if inside { NSCursor.resizeUpDown.push() } else { NSCursor.pop() }
             }
             .gesture(
-                DragGesture()
+                DragGesture(minimumDistance: 0, coordinateSpace: .global)
                     .onChanged { value in
-                        height = min(600, max(120, height - value.translation.height))
+                        let start = startHeight ?? height
+                        startHeight = start
+                        height = min(900, max(120, start - value.translation.height))
                     }
+                    .onEnded { _ in startHeight = nil }
             )
-            .offset(y: 3)
     }
 }
 
