@@ -609,6 +609,19 @@ final class AppModel: ObservableObject {
         }
     }
 
+    func syncWorktree(_ repo: String, worktree: String, pull: Bool) async {
+        busy = true
+        defer { busy = false }
+        do {
+            let message = try await Core.run { try $0.syncWorktree(repo: repo, worktree: worktree, pull: pull) }
+            await refresh()
+            showNotice("\(repo): \(message)")
+        } catch {
+            await refresh()
+            showError("\(repo): \(errorMessage(error))")
+        }
+    }
+
     func concludeMerge(_ repo: String, worktree: String) async -> Bool {
         await perform(success: "Merge concluído em \(repo)") { _ = try $0.concludeMerge(repo: repo, worktree: worktree) }
     }

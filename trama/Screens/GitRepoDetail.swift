@@ -340,6 +340,31 @@ struct WorktreesCard: View {
                                     .font(.system(size: 12))
                                     .foregroundStyle(w.changed > 0 ? Theme.text3 : Theme.faded)
                             }
+                            if w.isPrimary, !w.branch.isEmpty {
+                                Button {
+                                    Task { await model.syncWorktree(repo.name, worktree: w.path, pull: w.behindRemote > 0) }
+                                } label: {
+                                    if w.behindRemote > 0 {
+                                        Label("\(w.behindRemote)", systemImage: "arrow.down.circle.fill")
+                                            .font(.system(size: 11.5, weight: .medium))
+                                            .foregroundStyle(Theme.emberLight)
+                                    } else {
+                                        Image(systemName: "arrow.clockwise")
+                                            .font(.system(size: 11.5))
+                                            .foregroundStyle(Theme.text2)
+                                    }
+                                }
+                                .buttonStyle(.plain)
+                                .padding(.horizontal, w.behindRemote > 0 ? 8 : 0)
+                                .frame(minWidth: 26, minHeight: 26)
+                                .background(RoundedRectangle(cornerRadius: 7).fill(w.behindRemote > 0 ? Theme.ember.opacity(0.12) : Theme.surface))
+                                .overlay(RoundedRectangle(cornerRadius: 7).stroke(w.behindRemote > 0 ? Theme.ember.opacity(0.4) : Theme.line2, lineWidth: 1))
+                                .contentShape(Rectangle())
+                                .disabled(model.busy)
+                                .help(w.behindRemote > 0
+                                    ? "O remoto tem \(w.behindRemote) \(plural(w.behindRemote, "commit novo", "commits novos")) · atualizar \(w.branch) (fast-forward)"
+                                    : "Buscar novidades do remoto (fetch)")
+                            }
                             if !w.branch.isEmpty {
                                 AppMenu(width: 280) {
                                     Image(systemName: "arrow.triangle.merge")

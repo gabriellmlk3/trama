@@ -24,6 +24,7 @@ public struct WorktreeSummary: Hashable, Identifiable, Sendable {
     public var ahead: Int
     public var isPrimary: Bool
     public var conflicts = 0
+    public var behindRemote = 0
 
     public var id: String { path }
 }
@@ -261,7 +262,8 @@ extension Workspace {
                 changed: changed,
                 ahead: ahead,
                 isPrimary: Paths.real(info.path) == Paths.real(r.path),
-                conflicts: Git.conflictFiles(info.path).count
+                conflicts: Git.conflictFiles(info.path).count,
+                behindRemote: Git.behindUpstream(info.path)
             )
         }
     }

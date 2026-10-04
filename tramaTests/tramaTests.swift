@@ -1661,6 +1661,27 @@ final class GitOverviewTests: XCTestCase {
         XCTAssertTrue(try w.suggestCommitMessage(t.slug, repo: "api").contains("src/app.txt"))
     }
 
+    func testSyncWorktreeFetchesAndFastForwardsThePrimaryCopy() throws {
+        let lab = try Lab()
+        defer { lab.cleanup() }
+        let w = try lab.workspace()
+        let primary = try w.repo("api").path
+        XCTAssertEqual(Git.behindUpstream(primary), 0)
+
+        try lab.pushToMain("rebocs_api", "novo.txt", "x\n", "chegou do remoto")
+        XCTAssertEqual(Git.behindUpstream(primary), 0)
+
+        let found = try w.syncWorktree(repo: "api", worktree: primary, pull: false)
+        XCTAssertTrue(found.contains("1 commit novo"))
+        XCTAssertEqual(Git.behindUpstream(primary), 1)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: primary + "/novo.txt"))
+
+        let pulled = try w.syncWorktree(repo: "api", worktree: primary, pull: true)
+        XCTAssertTrue(pulled.contains("atualizada"))
+        XCTAssertEqual(Git.behindUpstream(primary), 0)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: primary + "/novo.txt"))
+    }
+
     func testDiscardFilesAndLines() throws {
         let lab = try Lab()
         defer { lab.cleanup() }
