@@ -52,6 +52,8 @@ struct FindingsView: View {
                 .disabled(scanning)
             }
 
+            TipCard(tips: [.findings])
+
             HStack(spacing: 8) {
                 FilterChip(title: "Tudo", count: model.findings.count, active: filter == nil) { filter = nil }
                 ForEach(groups, id: \.self) { g in

@@ -28,6 +28,7 @@ struct TramaDetailView: View {
                 VStack(alignment: .leading, spacing: 14) {
                     DetailBar(mode: mode, refreshing: refreshing) { refreshToken += 1 }
                         .padding(.trailing, 44)
+                    TipCard(tips: [.capsule, .agents])
                     switch mode.wrappedValue {
                     case .loom:
                         LoomView(selected: trama)
