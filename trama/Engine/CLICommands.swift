@@ -21,6 +21,7 @@ extension CLI {
                             usage: "trama sugestao [ls] [--trama x] [--json]\n  trama sugestao aceitar <n> [--trama x] [--sem-fetch]\n  trama sugestao dispensar <n> [--trama x]",
                             valueFlags: ["trama"], run: cmdSuggestion),
         "soltar": Command(summary: "tira um repositório da trama (a branch continua)", usage: "trama soltar <trama> <repo> [--forcar]", valueFlags: [], run: cmdDrop),
+        "abrir": Command(summary: "pede ao app para abrir o Claude Code numa trama", usage: "trama abrir <trama>", valueFlags: [], run: cmdOpen),
         "estacionar": Command(summary: "pausa uma trama (os worktrees ficam intactos)", usage: "trama estacionar [trama]", valueFlags: [], run: cmdPark),
         "retomar": Command(summary: "reativa uma trama, com rebase opcional na base", usage: "trama retomar <trama> [--rebase] [--sem-fetch]", valueFlags: [], run: cmdResume),
         "arquivar": Command(summary: "remove os worktrees e arquiva a trama (branches ficam)", usage: "trama arquivar <trama> [--forcar]", valueFlags: [], run: cmdArchive),
@@ -365,6 +366,13 @@ extension CLI {
         guard a.positionals.count >= 2 else { throw TramaError("uso: trama soltar <trama> <repo>") }
         let t = try w.dropRepo(a.positionals[0], a.positionals[1], force: a.has("forcar"))
         c.ok("\(t.title) agora tem \(t.repos.joined(separator: ", "))")
+    }
+
+    static func cmdOpen(_ c: Context, _ a: Arguments) throws {
+        let w = try c.open()
+        guard let slug = a.positional(0) else { throw TramaError("uso: trama abrir <trama>") }
+        try w.requestOpen(slug)
+        c.ok("pedido enviado: o app abre o Claude Code em \(slug) em instantes")
     }
 
     static func cmdPark(_ c: Context, _ a: Arguments) throws {

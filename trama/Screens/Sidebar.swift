@@ -6,13 +6,21 @@ struct Sidebar: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
-            HStack(spacing: 9) {
-                TramaLogo(size: 22)
-                Text("trama")
-                    .font(Theme.serif(28).italic())
-                Spacer()
+            Button {
+                model.screen = .home
+            } label: {
+                HStack(spacing: 9) {
+                    TramaLogo(size: 22)
+                    Text("trama")
+                        .font(Theme.serif(28).italic())
+                        .foregroundStyle(Theme.text)
+                    Spacer()
+                }
+                .contentShape(Rectangle())
             }
+            .buttonStyle(.plain)
             .padding(.horizontal, 6)
+            .help("Início")
 
             Button {
                 model.showingNewTrama = true
@@ -33,6 +41,8 @@ struct Sidebar: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+
+            HomeItem()
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
@@ -172,6 +182,33 @@ struct TramaIndicator: View {
             }
         }
         .font(.system(size: 11.5))
+    }
+}
+
+struct HomeItem: View {
+    @EnvironmentObject var model: AppModel
+
+    var body: some View {
+        let selected = model.screen == .home || model.screen == nil
+        Button {
+            model.screen = .home
+        } label: {
+            HStack(spacing: 10) {
+                Image(systemName: "house")
+                    .font(.system(size: 13))
+                Text("Início")
+                    .font(.system(size: 13, weight: selected ? .medium : .regular))
+                Spacer()
+                KeyCap(text: "⌘0")
+            }
+            .foregroundStyle(selected ? Theme.text : Theme.text2)
+            .padding(.horizontal, 10)
+            .frame(height: 38)
+            .background(RoundedRectangle(cornerRadius: 9).fill(selected ? Theme.surface2 : Color.clear))
+            .overlay(RoundedRectangle(cornerRadius: 9).stroke(selected ? Color(hex: 0x2B2E36) : Color.clear, lineWidth: 1))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 }
 

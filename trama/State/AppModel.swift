@@ -6,6 +6,7 @@ import SwiftUI
 @MainActor
 final class AppModel: ObservableObject {
     enum Screen: Hashable {
+        case home
         case trama(String)
         case findings
     }
@@ -61,6 +62,7 @@ final class AppModel: ObservableObject {
                 guard let self else { return }
                 cycle += 1
                 await self.refresh()
+                await self.openRequested()
                 if cycle % 36 == 0 { await self.fetchRemotes() }
                 if cycle % 12 == 0 {
                     await self.refreshFindings()
@@ -79,9 +81,7 @@ final class AppModel: ObservableObject {
             state = new
             notifyTransitions(new)
             needsSetup = false
-            if screen == nil, let first = new.tramas.first(where: { $0.isActive }) ?? new.tramas.first {
-                screen = .trama(first.slug)
-            }
+            if screen == nil { screen = .home }
             if let t = selectedTrama {
                 await loadCapsule(t.slug)
             }
@@ -492,6 +492,24 @@ final class AppModel: ObservableObject {
         }
         parts += extraDirs.flatMap { ["--add-dir", shellQuoted($0)] }
         return parts.joined(separator: " ")
+    }
+
+    func openRequested() async {
+        let slug = try? await Core.run { $0.takeOpenRequest() }
+        guard let slug = slug ?? nil, let live = state?.tramas.first(where: { $0.slug == slug }) else { return }
+        select(slug)
+        openClaudeInAll(live)
+    }
+
+    func askHomeAgent(_ request: String) {
+        let text = request.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty, let root = state?.root else { return }
+        guard let exe = Integration.embeddedCommand else {
+            showError("não encontrei o executável do app")
+            return
+        }
+        let command = "claude " + shellQuoted(HomeAgent.prompt(request: text, executable: exe))
+        terminals.open(path: root, command: command, title: "agent geral · claude", blocks: false)
     }
 
     func openClaude(path: String, title: String, resume: ClaudeResume) {

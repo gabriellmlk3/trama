@@ -52,10 +52,10 @@ struct DetailView: View {
             if let t = model.selectedTrama {
                 TramaDetailView(trama: t)
             } else {
-                EmptyStateView()
+                HomeView()
             }
-        case nil:
-            EmptyStateView()
+        case .home?, nil:
+            HomeView()
         }
     }
 }
@@ -83,6 +83,9 @@ struct EmptyStateView: View {
             }
             .buttonStyle(EmberButton())
             .disabled(model.repos.isEmpty)
+            if !model.repos.isEmpty {
+                HomeAgentBox()
+            }
             if model.repos.isEmpty {
                 Button("Cadastrar repositórios…") {
                     let folders = Terminal.choosePaths(multiple: true, title: "Escolha os repositórios que podem entrar em tramas")

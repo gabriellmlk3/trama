@@ -27,6 +27,16 @@ final class FlowTests: XCTestCase {
         XCTAssertEqual(w2.config.context, lab.repos["rebocs-context"])
     }
 
+    func testOpenRequestIsConsumedOnce() throws {
+        let w = try lab.workspace()
+        let (t, _) = try w.newTrama(NewTramaOptions(title: "Pedido de abertura", repos: ["api"]))
+        XCTAssertNil(w.takeOpenRequest())
+        XCTAssertThrowsError(try w.requestOpen("nao-existe"))
+        try w.requestOpen(t.slug)
+        XCTAssertEqual(w.takeOpenRequest(), t.slug)
+        XCTAssertNil(w.takeOpenRequest())
+    }
+
     func testFullFlow() throws {
         let w = try lab.workspace()
         let repos = lab.repos
