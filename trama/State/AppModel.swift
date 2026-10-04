@@ -398,9 +398,9 @@ final class AppModel: ObservableObject {
         await perform(success: "Commit feito em \(repo)") { _ = try $0.commitChanges(slug, repo: repo, paths: paths, message: message) }
     }
 
-    func suggestCommitMessage(_ slug: String, repo: String) async -> String? {
+    func suggestCommitMessage(_ slug: String, repo: String, paths: [String]? = nil) async -> String? {
         do {
-            return try await Core.run { try $0.suggestCommitMessage(slug, repo: repo) }
+            return try await Core.run { try $0.suggestCommitMessage(slug, repo: repo, paths: paths) }
         } catch {
             showError("\(repo): \(errorMessage(error))")
             return nil

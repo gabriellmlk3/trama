@@ -1641,6 +1641,26 @@ final class GitOverviewTests: XCTestCase {
         XCTAssertTrue(try w.gitOverview(t.slug, repo: "api").changes.isEmpty)
     }
 
+    func testSuggestedMessageOnlySeesChosenFiles() throws {
+        let lab = try Lab()
+        defer { lab.cleanup() }
+        let w = try lab.workspace()
+        let (t, _) = try w.newTrama(NewTramaOptions(title: "Mensagem sugerida", repos: ["api"], noFetch: true))
+        let wt = w.worktreePath(t.slug, "rebocs_api")
+        try lab.write(wt + "/src/app.txt", "linha 1\nmudou\nlinha 3\n")
+        try lab.write(wt + "/solto.txt", "a\n")
+        let fake = lab.root + "/claude"
+        try lab.write(fake, "#!/bin/sh\nprintf '%s' \"$2\"\n")
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: fake)
+        setenv("TRAMA_CLAUDE", fake, 1)
+        defer { unsetenv("TRAMA_CLAUDE") }
+
+        let prompt = try w.suggestCommitMessage(t.slug, repo: "api", paths: ["solto.txt"])
+        XCTAssertTrue(prompt.contains("solto.txt"))
+        XCTAssertFalse(prompt.contains("src/app.txt"))
+        XCTAssertTrue(try w.suggestCommitMessage(t.slug, repo: "api").contains("src/app.txt"))
+    }
+
     func testDiscardFilesAndLines() throws {
         let lab = try Lab()
         defer { lab.cleanup() }

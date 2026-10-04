@@ -629,6 +629,7 @@ struct CommitPanel: View {
     let changes: [FileChange]
     @Binding var unchecked: Set<String>
     @State private var message = ""
+    @State private var generating = false
 
     var chosen: [String] { changes.map(\.id).filter { !unchecked.contains($0) } }
     var canCommit: Bool {
@@ -652,6 +653,18 @@ struct CommitPanel: View {
                         .foregroundStyle(Theme.waitText)
                 }
                 HStack {
+                    Button {
+                        generate()
+                    } label: {
+                        if generating {
+                            ProgressView().controlSize(.mini)
+                        } else {
+                            Label("Gerar mensagem", systemImage: "sparkles")
+                        }
+                    }
+                    .buttonStyle(GhostButton(compact: true))
+                    .disabled(generating || chosen.isEmpty)
+                    .help("Gerar a mensagem com o Claude a partir dos arquivos marcados")
                     Spacer()
                     Button {
                         let paths = chosen
@@ -671,6 +684,18 @@ struct CommitPanel: View {
                 }
             }
             .padding(12)
+        }
+    }
+
+    func generate() {
+        guard !generating else { return }
+        generating = true
+        let paths = chosen
+        Task {
+            if let suggestion = await model.suggestCommitMessage(trama.slug, repo: repo, paths: paths) {
+                message = suggestion
+            }
+            generating = false
         }
     }
 }

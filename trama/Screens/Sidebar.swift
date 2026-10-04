@@ -11,14 +11,6 @@ struct Sidebar: View {
                 Text("trama")
                     .font(Theme.serif(28).italic())
                 Spacer()
-                Button {
-                    model.showingNewTrama = true
-                } label: {
-                    Image(systemName: "plus")
-                }
-                .buttonStyle(IconButton())
-                .help("Nova trama (⌘N)")
-                .accessibilityLabel("Nova trama")
             }
             .padding(.horizontal, 6)
 

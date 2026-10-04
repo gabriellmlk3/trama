@@ -11,14 +11,14 @@ extension CLITool {
 }
 
 extension Workspace {
-    public func suggestCommitMessage(_ slug: String, repo name: String) throws -> String {
+    public func suggestCommitMessage(_ slug: String, repo name: String, paths: [String]? = nil) throws -> String {
         let wt = worktreePath(slug, try repo(name).name)
         guard Paths.isDirectory(wt) else { throw TramaError("worktree não encontrado em \(Paths.abbreviate(wt))") }
-        let changes = Git.fileChanges(wt)
+        let changes = Git.fileChanges(wt).filter { paths?.contains($0.id) ?? true }
         guard !changes.isEmpty else { throw TramaError("não há mudanças em \(name)") }
         let prompt = Self.commitPrompt(
             files: changes.map { "\($0.code.trimmingCharacters(in: .whitespaces)) \($0.path) (+\($0.added) -\($0.removed))" },
-            diff: Self.boundedDiff(wt, untracked: changes.filter(\.untracked).map(\.path)),
+            diff: Self.boundedDiff(wt, paths: paths == nil ? nil : changes.map(\.path), untracked: changes.filter(\.untracked).map(\.path)),
             recent: (try? Git.run(wt, "log", "-8", "--format=%s")) ?? ""
         )
         let raw = try CLITool.claude.run(wt, ["-p", prompt, "--model", "haiku"])
@@ -27,8 +27,10 @@ extension Workspace {
         return message
     }
 
-    static func boundedDiff(_ wt: String, untracked: [String], limit: Int = 24_000) -> String {
-        var diff = (try? Git.run(wt, ["diff", "HEAD", "--no-color", "--unified=2"])) ?? ""
+    static func boundedDiff(_ wt: String, paths: [String]? = nil, untracked: [String], limit: Int = 24_000) -> String {
+        var args = ["diff", "HEAD", "--no-color", "--unified=2"]
+        if let paths { args += ["--"] + paths }
+        var diff = (try? Git.run(wt, args)) ?? ""
         if diff.count > limit { diff = String(diff.prefix(limit)) + "\n[diff truncado]" }
         if !untracked.isEmpty {
             diff += "\n\nArquivos novos (sem diff): " + untracked.prefix(40).joined(separator: ", ")
