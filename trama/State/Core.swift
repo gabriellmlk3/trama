@@ -38,6 +38,23 @@ enum Integration {
         try? FileManager.default.destinationOfSymbolicLink(atPath: terminalLink)
     }
 
+    static func agentPath(root: String, current: String?) -> String {
+        var dirs: [String] = []
+        if let exe = embeddedCommand {
+            let bin = Paths.join(root, ".trama", "bin")
+            let link = Paths.join(bin, "trama")
+            let fm = FileManager.default
+            if (try? fm.destinationOfSymbolicLink(atPath: link)) != exe {
+                try? fm.createDirectory(atPath: bin, withIntermediateDirectories: true)
+                try? fm.removeItem(atPath: link)
+                try? fm.createSymbolicLink(atPath: link, withDestinationPath: exe)
+            }
+            dirs.append(bin)
+        }
+        dirs += (current ?? "/usr/bin:/bin:/usr/sbin:/sbin").split(separator: ":").map(String.init)
+        return dirs.joined(separator: ":")
+    }
+
     static func isCommandInstalled() -> Bool {
         guard let exe = embeddedCommand else { return false }
         return linkDestination == exe

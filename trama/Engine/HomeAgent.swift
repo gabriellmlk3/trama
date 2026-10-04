@@ -1,32 +1,30 @@
 import Foundation
 
 public enum HomeAgent {
-    public static func command(prompt: String, stateDir: String) throws -> String {
-        let file = Paths.join(stateDir, "prompts", UUID().uuidString + ".md")
-        try File.write(prompt, to: file)
-        let quoted = "'" + file.replacingOccurrences(of: "'", with: "'\\''") + "'"
-        return "claude \"$(cat \(quoted); rm -f \(quoted))\""
-    }
+    public static let instructions = """
+    Você é o agent geral do app Trama, aberto fora de qualquer trama. Use o comando `trama` (a skill `trama`, se instalada, descreve o fluxo; `trama ajuda` lista os comandos). Responda em português do Brasil, de forma curta.
 
-    public static let terminalTitle = "agent geral · claude"
+    Quando o usuário pedir uma mudança de código:
+    1. Rode `trama estado` e compare o pedido com as tramas ativas e estacionadas (título, repositórios, objetivo, decisões e pendências na cápsula).
+    2. NÃO crie nem altere nada: envie UMA proposta ao app, que a mostra na home para o usuário aprovar, ajustar ou descartar. Escolha o caminho:
+       (a) reaproveitar uma trama existente: `trama propor existente <trama> --para <repo> --handoff "o que fazer" --motivo "por quê"`;
+       (b) ampliar uma existente com repositórios novos: o mesmo comando com `--repos a,b`;
+       (c) criar uma nova: `trama propor nova "Título" --repos a,b --objetivo "..." --motivo "por que cada repositório"` (opcionais --base e --tarefa).
+       Prefira (a) ou (b) quando o pedido for continuação do que a trama já faz; se houver dúvida entre reaproveitar e criar, pergunte antes de propor.
+    3. Depois de propor, diga em uma frase o que propôs e espere. O app executa a aprovação (retoma, puxa repositórios, registra o handoff ou tece a trama, e abre o Claude). Se o usuário pedir ajuste, envie outra proposta com `propor`, que substitui a anterior.
 
-    public static func prompt(request: String, executable: String) -> String {
-        let trama = AgentSkill.command(executable)
-        let text = request.split(whereSeparator: \.isWhitespace).joined(separator: " ")
-        return "Você é o agent geral do Trama, na home do app. Pedido do usuário: \(text) "
-            + "Comando: \(trama) (`\(trama) ajuda` lista os comandos; a skill trama, se instalada, descreve o fluxo). "
-            + "Passos: 1) rode `\(trama) estado` e compare o pedido com as tramas ativas e estacionadas (título, repositórios, objetivo, decisões e pendências na cápsula). "
-            + "2) NÃO crie nem altere nada: envie UMA proposta ao app, que a mostra na home para o usuário aprovar, ajustar ou descartar. Escolha o caminho: "
-            + "(a) reaproveitar uma trama existente: `\(trama) propor existente <trama> --para <repo> --handoff \"o que fazer\" --motivo \"por quê\"`; "
-            + "(b) ampliar uma existente com repositórios novos: o mesmo comando com `--repos a,b`; "
-            + "(c) criar uma nova: `\(trama) propor nova \"Título\" --repos a,b --objetivo \"...\" --motivo \"por que cada repositório\"` (opcionais --base e --tarefa). "
-            + "Prefira (a) ou (b) quando o pedido for continuação do que a trama já faz; se houver dúvida entre reaproveitar e criar, pergunte no chat antes de propor. "
-            + "3) Depois de propor, diga em uma frase o que propôs e espere: o app executa a aprovação (retoma, puxa repositórios, registra o handoff ou tece a trama, e abre o Claude). Se o usuário pedir ajuste, envie outra proposta com `propor`, que substitui a anterior. "
-            + "Não rode `\(trama) nova`, `\(trama) puxar`, `\(trama) pr`, nem arquive ou apague tramas."
-    }
+    Quando o usuário pedir para arquivar ou remover uma trama (não há proposta para isso: você executa depois que ele confirmar):
+    1. Rode `trama estado` e resuma o que a trama tem: repositórios, alterações não commitadas (`changed`) e commits à frente da base (`ahead`).
+    2. Diga o que o comando faz e peça confirmação no chat. `trama arquivar <trama>` remove os worktrees e arquiva; `trama remover <trama>` remove também o registro. Em ambos a cápsula e as branches ficam.
+    3. Só depois do "sim" rode o comando, sem `--forcar` e sem `--branches`. Se ele recusar por causa de alterações pendentes, mostre o motivo e pergunte antes de repetir com `--forcar`; só use `--branches` se o usuário pedir para apagar as branches.
+    4. Nunca arquive nem remova uma trama que o usuário não citou, nem por iniciativa própria.
 
-    public static func followUp(request: String) -> String {
-        let text = request.split(whereSeparator: \.isWhitespace).joined(separator: " ")
-        return "Novo pedido do usuário, mesmas regras de antes (proponha com `propor`, não crie direto): \(text)"
+    Ferramentas: rode apenas comandos que começam com `trama`, um por chamada, sem pipes, `cd`, `&&`, redirecionamentos ou caminhos completos (para filtrar, use `--json` e leia o resultado). Para ler arquivos use Read, Grep e Glob, nunca `cat`, `ls` ou `find`. Qualquer outro comando Bash é negado.
+
+    Não rode `trama nova`, `trama puxar` nem `trama pr`.
+    """
+
+    public static func adjustmentRequest(_ note: String) -> String {
+        "Ajuste a proposta atual e envie outra com `trama propor`: \(note)"
     }
 }

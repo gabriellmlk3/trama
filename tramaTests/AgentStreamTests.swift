@@ -69,6 +69,12 @@ final class AgentStreamTests: XCTestCase {
         XCTAssertTrue(c.items[1].text.contains("Bash"))
     }
 
+    func testDeniedNoticeShowsTheCommand() {
+        let denied = #"{"type":"result","is_error":false,"result":"ok","permission_denials":[{"tool_name":"Bash","tool_input":{"command":"cd /x && trama ls\nsegunda linha"}}]}"#
+        let c = conversation([denied])
+        XCTAssertTrue(c.items.last?.text.contains("Bash `cd /x && trama ls`") ?? false)
+    }
+
     func testStreamDeliversLinesInOrderAndTheExitCode() throws {
         let done = expectation(description: "exit")
         let box = LineBox()

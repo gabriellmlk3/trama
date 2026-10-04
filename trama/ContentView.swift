@@ -62,19 +62,19 @@ struct DetailView: View {
     }
 }
 
-struct HomeView: View {
+struct EmptyStateView: View {
     @EnvironmentObject var model: AppModel
 
     var body: some View {
         GeneralAgentView(session: model.homeAgent) {
-            HomeHero()
+            EmptyStateHero()
         }
         .padding(.horizontal, 28)
         .padding(.bottom, 8)
     }
 }
 
-struct HomeHero: View {
+struct EmptyStateHero: View {
     @EnvironmentObject var model: AppModel
 
     var body: some View {
@@ -87,38 +87,27 @@ struct HomeHero: View {
                 .foregroundStyle(Theme.text3)
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: 520)
-            HStack(spacing: 10) {
-                Button {
-                    model.showingNewTrama = true
-                } label: {
-                    HStack(spacing: 8) {
-                        Text(model.state?.tramas.isEmpty ?? true ? "Tecer a primeira trama" : "Tecer nova trama")
-                        KeyCap(text: "⌘N", dark: true)
-                    }
+            Button {
+                model.showingNewTrama = true
+            } label: {
+                HStack(spacing: 8) {
+                    Text("Tecer a primeira trama")
+                    KeyCap(text: "⌘N", dark: true)
                 }
             }
             .buttonStyle(EmberButton())
             .disabled(model.repos.isEmpty)
-            if !model.repos.isEmpty {
-                if let proposal = model.proposal {
-                    HomeProposalCard(proposal: proposal)
-                }
-                HomeAgentBox()
+            if let proposal = model.proposal {
+                HomeProposalCard(proposal: proposal)
             }
             if model.repos.isEmpty {
                 Button("Cadastrar repositórios…") {
                     let folders = Terminal.choosePaths(multiple: true, title: "Escolha os repositórios que podem entrar em tramas")
                     Task { await model.addRepos(folders) }
                 }
+                .buttonStyle(GhostButton())
             }
         }
-    }
-}
-
-struct EmptyStateView: View {
-    var body: some View {
-        HomeHero()
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
 

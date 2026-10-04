@@ -22,27 +22,7 @@ struct GeneralAgentView<Hero: View>: View {
             .onAppear { focused = true }
         } else {
             VStack(spacing: 0) {
-                ScrollViewReader { proxy in
-                    ScrollView {
-                        LazyVStack(alignment: .leading, spacing: 14) {
-                            ForEach(items) { item in
-                                AgentItemRow(item: item)
-                                    .id(item.id)
-                            }
-                            if session.running { AgentWorking() }
-                            Color.clear.frame(height: 1).id("bottom")
-                        }
-                        .padding(.vertical, 16)
-                        .padding(.trailing, 12)
-                        .frame(maxWidth: 820, alignment: .leading)
-                        .frame(maxWidth: .infinity)
-                    }
-                    .onChange(of: items.last) { _, _ in
-                        withAnimation(.easeOut(duration: 0.15)) {
-                            proxy.scrollTo("bottom", anchor: .bottom)
-                        }
-                    }
-                }
+                AgentConversationList(session: session)
                 inputBar
                     .frame(maxWidth: 820)
                     .padding(.vertical, 14)
@@ -59,6 +39,36 @@ struct GeneralAgentView<Hero: View>: View {
         let text = draft
         draft = ""
         session.send(text)
+    }
+}
+
+struct AgentConversationList: View {
+    @ObservedObject var session: GeneralAgentSession
+
+    private var items: [AgentItem] { session.conversation.items }
+
+    var body: some View {
+        ScrollViewReader { proxy in
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 14) {
+                    ForEach(items) { item in
+                        AgentItemRow(item: item)
+                            .id(item.id)
+                    }
+                    if session.running { AgentWorking() }
+                    Color.clear.frame(height: 1).id("bottom")
+                }
+                .padding(.vertical, 16)
+                .padding(.horizontal, 40)
+                .frame(maxWidth: 900, alignment: .leading)
+                .frame(maxWidth: .infinity)
+            }
+            .onChange(of: items.last) { _, _ in
+                withAnimation(.easeOut(duration: 0.15)) {
+                    proxy.scrollTo("bottom", anchor: .bottom)
+                }
+            }
+        }
     }
 }
 

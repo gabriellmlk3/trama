@@ -88,7 +88,13 @@ struct AgentStreamParser {
     }
 
     private func parseResult(_ object: [String: Any]) -> AgentResult {
-        let denials = (object["permission_denials"] as? [[String: Any]] ?? []).compactMap { $0["tool_name"] as? String }
+        let denials = (object["permission_denials"] as? [[String: Any]] ?? []).compactMap { denial -> String? in
+            guard let name = denial["tool_name"] as? String else { return nil }
+            let input = denial["tool_input"] as? [String: Any] ?? [:]
+            let detail = (input["command"] as? String) ?? (input["file_path"] as? String) ?? ""
+            let line = detail.split(separator: "\n").first.map(String.init) ?? ""
+            return line.isEmpty ? name : "\(name) `\(line.count > 90 ? String(line.prefix(90)) + "…" : line)`"
+        }
         return AgentResult(
             isError: object["is_error"] as? Bool ?? false,
             message: object["result"] as? String,
@@ -180,7 +186,7 @@ struct AgentConversation: Equatable {
             if result.isError { addError(result.message ?? "O Claude terminou com erro.") }
             if !result.deniedTools.isEmpty {
                 let names = Array(Set(result.deniedTools)).sorted().joined(separator: ", ")
-                addNotice("Sem permissão no modo visual: \(names). Use “Abrir no Claude” para aprovar no terminal.")
+                addNotice("Sem permissão no modo visual: \(names).")
             }
         }
     }

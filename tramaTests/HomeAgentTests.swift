@@ -2,24 +2,44 @@ import XCTest
 @testable import trama
 
 final class HomeAgentTests: XCTestCase {
-    func testPromptAsksForProposalBeforeCreating() {
-        let prompt = HomeAgent.prompt(request: "ajustar login\nno api e no admin", executable: "/Applications/My Apps/Trama.app/Contents/MacOS/trama")
-        XCTAssertFalse(prompt.contains("\n"))
-        XCTAssertTrue(prompt.contains("ajustar login no api e no admin"))
-        XCTAssertTrue(prompt.contains("\"/Applications/My Apps/Trama.app/Contents/MacOS/trama\" estado"))
-        XCTAssertTrue(prompt.contains("NÃO crie nem altere nada"))
+    func testInstructionsRequireProposalInsteadOfCreating() {
+        let text = HomeAgent.instructions
+        XCTAssertTrue(text.contains("trama estado"))
+        XCTAssertTrue(text.contains("trama propor existente"))
+        XCTAssertTrue(text.contains("trama propor nova"))
+        XCTAssertTrue(text.contains("NÃO crie nem altere nada"))
+        XCTAssertTrue(text.contains("Não rode `trama nova`"))
     }
 
-    func testCommandKeepsLongPromptOutOfTheTerminalLine() throws {
+    func testInstructionsCoverArchiveAndRemoveWithConfirmation() {
+        let text = HomeAgent.instructions
+        XCTAssertTrue(text.contains("trama arquivar"))
+        XCTAssertTrue(text.contains("trama remover"))
+        XCTAssertTrue(text.contains("peça confirmação no chat"))
+        XCTAssertTrue(text.contains("sem `--forcar` e sem `--branches`"))
+    }
+
+    func testAdjustmentRequestMentionsProposeCommand() {
+        let text = HomeAgent.adjustmentRequest("trocar o repo")
+        XCTAssertTrue(text.contains("trama propor"))
+        XCTAssertTrue(text.hasSuffix("trocar o repo"))
+    }
+
+    @MainActor
+    func testSessionUsesHomeInstructionsAndAllowsTramaCommand() {
+        XCTAssertEqual(GeneralAgentSession.role, HomeAgent.instructions)
+        XCTAssertTrue(GeneralAgentSession.allowedTools.contains("Bash(trama *)"))
+    }
+
+    func testAgentPathPutsTramaLinkFirst() throws {
         let lab = try Lab()
         defer { lab.cleanup() }
-        let prompt = String(repeating: "texto longo ", count: 400)
-        let command = try HomeAgent.command(prompt: prompt, stateDir: Paths.join(lab.root, ".trama"))
-        XCTAssertLessThan(command.utf8.count, 400)
-        XCTAssertTrue(command.hasPrefix("claude \"$(cat '"))
-        let folder = Paths.join(lab.root, ".trama", "prompts")
-        let files = try FileManager.default.contentsOfDirectory(atPath: folder)
-        XCTAssertEqual(files.count, 1)
-        XCTAssertEqual(try File.read(Paths.join(folder, files[0])), prompt)
+        let path = Integration.agentPath(root: lab.root, current: "/usr/bin:/bin")
+        let parts = path.split(separator: ":").map(String.init)
+        XCTAssertTrue(parts.suffix(2) == ["/usr/bin", "/bin"])
+        if let exe = Integration.embeddedCommand {
+            XCTAssertEqual(parts.first, Paths.join(lab.root, ".trama", "bin"))
+            XCTAssertEqual(try FileManager.default.destinationOfSymbolicLink(atPath: Paths.join(lab.root, ".trama", "bin", "trama")), exe)
+        }
     }
 }

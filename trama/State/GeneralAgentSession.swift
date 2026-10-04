@@ -4,7 +4,7 @@ import Foundation
 final class GeneralAgentSession: ObservableObject {
     static let allowedTools = ["Read", "Grep", "Glob", "Bash(trama *)", "Bash(git status*)", "Bash(git diff*)", "Bash(git log*)"]
 
-    static let role = "Você é o agent geral do app Trama, aberto fora de qualquer trama. Use o comando `trama` (status, capsula, nova, decisao, handoff, pendencia) para ver e gerenciar todas as tramas; a skill `trama` descreve os comandos. Responda em português do Brasil, de forma curta."
+    static let role = HomeAgent.instructions
 
     let path: String
     let extraDirs: [String]
@@ -33,6 +33,7 @@ final class GeneralAgentSession: ObservableObject {
         let current = turn
         var environment = ProcessInfo.processInfo.environment
         environment["NO_COLOR"] = "1"
+        environment["PATH"] = Integration.agentPath(root: path, current: environment["PATH"])
         do {
             handle = try ProcessRunner.stream(
                 executable,

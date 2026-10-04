@@ -36,9 +36,8 @@ final class AppModel: ObservableObject {
     private var lastFetch = Date.distantPast
     private var knownAgents: [Agent]?
     private var agentsLoop: Task<Void, Never>?
-    @Published private var homeAgentAskedAt: Date?
     @Published var proposal: Proposal?
-    private var homeSessionID: TerminalSession.ID?
+    @Published var homeShowsConversation = false
 
     var waitingCount: Int { activeAgents.filter { $0.isWaiting }.count }
 
@@ -61,7 +60,6 @@ final class AppModel: ObservableObject {
                 guard let self else { return }
                 await self.refreshAgents()
                 await self.refreshProposal()
-                self.expireHomeAgentAsk()
             }
         }
         loop = Task { [weak self] in
@@ -97,10 +95,6 @@ final class AppModel: ObservableObject {
         if current != proposal { proposal = current }
     }
 
-    private func expireHomeAgentAsk() {
-        if let asked = homeAgentAskedAt, Date().timeIntervalSince(asked) > 45 { homeAgentAskedAt = nil }
-    }
-
     func refresh() async {
         guard !refreshing else { return }
         refreshing = true
@@ -126,7 +120,7 @@ final class AppModel: ObservableObject {
         NSApp.dockTile.badgeLabel = waiting > 0 ? String(waiting) : nil
         defer { knownAgents = new.agents }
         guard let previous = knownAgents else { return }
-        for transition in agentTransitions(from: previous, to: new.agents) {
+        for transition in agentTransitions(from: previous, to: new.agents) where !transition.agent.isHome {
             let agent = transition.agent
             let live = new.tramas.first(where: { $0.slug == agent.trama })
             let path = live?.status(for: agent.repo)?.path ?? agent.cwd
@@ -267,13 +261,6 @@ final class AppModel: ObservableObject {
     var parked: [LiveTrama] { visibleTramas.filter { $0.isParked } }
     var repos: [RepoConfig] { state?.repos ?? [] }
     var activeAgents: [Agent] { (state?.agents ?? []).filter { !$0.isHome } }
-    var homeAgent: Agent? { state?.agents.first { $0.isHome } }
-    var homeAgentState: String? {
-        if let since = homeAgentAskedAt, homeAgent.map({ $0.updatedAt < Int64(since.timeIntervalSince1970) || $0.state == AgentState.open }) ?? true {
-            return AgentState.working
-        }
-        return homeAgent?.state
-    }
 
     var selectedTrama: LiveTrama? {
         guard case .trama(let slug)? = screen else { return nil }
@@ -545,41 +532,19 @@ final class AppModel: ObservableObject {
         openClaudeInAll(live)
     }
 
-    private var homeSessionIsAlive: TerminalSession? {
-        guard let id = homeSessionID, homeAgent != nil || homeAgentAskedAt != nil else { return nil }
-        return terminals.sessions.first { $0.id == id && $0.running }
-    }
-
     func askHomeAgent(_ request: String) {
-        let text = request.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty, let root = state?.root else { return }
-        homeAgentAskedAt = Date()
-        if let session = homeSessionIsAlive {
-            session.engine.submit(HomeAgent.followUp(request: text))
-            terminals.selectedID = session.id
-            terminals.expanded = true
-            return
-        }
-        guard let exe = Integration.embeddedCommand else {
-            homeAgentAskedAt = nil
-            showError("não encontrei o executável do app")
-            return
-        }
-        let command: String
-        do {
-            command = try HomeAgent.command(prompt: HomeAgent.prompt(request: text, executable: exe), stateDir: Paths.join(root, ".trama"))
-        } catch {
-            homeAgentAskedAt = nil
-            showError(errorMessage(error))
-            return
-        }
-        homeSessionID = terminals.open(path: root, command: command, title: HomeAgent.terminalTitle, blocks: false)
+        homeAgent.send(request)
     }
 
     func refineProposal(_ text: String) {
         let note = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !note.isEmpty else { return }
-        askHomeAgent("Ajuste a proposta atual e envie outra com `propor`: \(note)")
+        guard !homeAgent.running else {
+            showNotice("O agent geral ainda está respondendo · tente de novo quando ele terminar")
+            return
+        }
+        homeAgent.send(HomeAgent.adjustmentRequest(note))
+        homeShowsConversation = true
     }
 
     func discardProposal() {

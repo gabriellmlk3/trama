@@ -71,9 +71,13 @@ struct HomeView: View {
             EmptyStateView()
         } else {
             VStack(spacing: 0) {
-                homeScroll
+                if model.homeShowsConversation {
+                    AgentConversationList(session: model.homeAgent)
+                } else {
+                    homeScroll
+                }
                 if !model.repos.isEmpty {
-                    HomeAgentBar()
+                    HomeAgentBar(session: model.homeAgent, showingChat: $model.homeShowsConversation)
                 }
             }
         }
@@ -207,30 +211,32 @@ struct HomeProposalCard: View {
 
 struct HomeAgentBar: View {
     @EnvironmentObject var model: AppModel
+    @ObservedObject var session: GeneralAgentSession
+    @Binding var showingChat: Bool
 
     var body: some View {
         VStack(spacing: 12) {
             if let proposal = model.proposal {
                 HomeProposalCard(proposal: proposal)
             }
-            HomeAgentBox()
+            HomeAgentBox(session: session, showingChat: $showingChat)
         }
-            .padding(.horizontal, 40)
-            .padding(.vertical, 14)
-            .frame(maxWidth: .infinity)
-            .background(Theme.panel)
-            .overlay(alignment: .top) {
-                Rectangle().fill(Theme.line).frame(height: 1)
-            }
+        .padding(.horizontal, 40)
+        .padding(.vertical, 14)
+        .frame(maxWidth: .infinity)
+        .background(Theme.panel)
+        .overlay(alignment: .top) {
+            Rectangle().fill(Theme.line).frame(height: 1)
+        }
     }
 }
 
 struct HomeAgentPulse: View {
-    @EnvironmentObject var model: AppModel
+    @ObservedObject var session: GeneralAgentSession
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
-        HomeAgentPulseDot(state: model.homeAgentState, reduceMotion: reduceMotion)
+        HomeAgentPulseDot(state: session.running ? AgentState.working : nil, reduceMotion: reduceMotion)
     }
 }
 
@@ -267,28 +273,50 @@ struct HomeAgentPulseDot: View {
 }
 
 struct HomeAgentBox: View {
-    @EnvironmentObject var model: AppModel
+    @ObservedObject var session: GeneralAgentSession
+    @Binding var showingChat: Bool
     @State private var text = ""
 
     private var empty: Bool { text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+    private var hasConversation: Bool { !session.conversation.items.isEmpty }
 
     var body: some View {
         HStack(spacing: 10) {
-            HomeAgentPulse()
+            HomeAgentPulse(session: session)
             TextField("Descreva o que precisa mudar e o agent propõe a trama", text: $text)
                 .textFieldStyle(.plain)
                 .font(.system(size: 13.5))
                 .onSubmit(send)
-            Button(action: send) {
-                Image(systemName: "arrow.up")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(Color.black)
-                    .frame(width: 24, height: 24)
-                    .background(Circle().fill(empty ? Theme.ember.opacity(0.4) : Theme.ember))
+            if hasConversation {
+                Button(showingChat ? "Ver início" : "Ver conversa") { showingChat.toggle() }
+                    .buttonStyle(GhostButton(compact: true))
             }
-            .buttonStyle(.plain)
-            .disabled(empty)
-            .help("Abrir o agent geral com este pedido")
+            if session.running {
+                Button {
+                    session.stop()
+                } label: {
+                    Image(systemName: "stop.fill")
+                        .font(.system(size: 10))
+                        .foregroundStyle(Theme.text)
+                        .frame(width: 24, height: 24)
+                        .background(Circle().fill(Theme.surface2))
+                }
+                .buttonStyle(.plain)
+                .help("Interromper")
+                .accessibilityLabel("Interromper")
+            } else {
+                Button(action: send) {
+                    Image(systemName: "arrow.up")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(Color.black)
+                        .frame(width: 24, height: 24)
+                        .background(Circle().fill(empty ? Theme.ember.opacity(0.4) : Theme.ember))
+                }
+                .buttonStyle(.plain)
+                .disabled(empty)
+                .help("Enviar ao agent geral")
+                .accessibilityLabel("Enviar")
+            }
         }
         .padding(.horizontal, 14)
         .frame(height: 44)
@@ -298,9 +326,10 @@ struct HomeAgentBox: View {
     }
 
     private func send() {
-        guard !empty else { return }
-        model.askHomeAgent(text)
+        guard !empty, !session.running else { return }
+        session.send(text)
         text = ""
+        showingChat = true
     }
 }
 
