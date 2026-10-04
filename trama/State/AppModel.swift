@@ -35,6 +35,10 @@ final class AppModel: ObservableObject {
     private var refreshing = false
     private var lastFetch = Date.distantPast
     private var knownAgents: [Agent]?
+    private var agentsLoop: Task<Void, Never>?
+    @Published private var homeAgentAskedAt: Date?
+    @Published var proposal: Proposal?
+    private var homeSessionID: TerminalSession.ID?
 
     var waitingCount: Int { activeAgents.filter { $0.isWaiting }.count }
 
@@ -51,6 +55,15 @@ final class AppModel: ObservableObject {
         NotificationCenter.default.addObserver(forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
             Task { @MainActor in await self?.fetchIfStale() }
         }
+        agentsLoop = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+                guard let self else { return }
+                await self.refreshAgents()
+                await self.refreshProposal()
+                self.expireHomeAgentAsk()
+            }
+        }
         loop = Task { [weak self] in
             DispatchQueue.global(qos: .utility).async { Integration.sync() }
             await self?.refresh()
@@ -63,6 +76,7 @@ final class AppModel: ObservableObject {
                 guard let self else { return }
                 cycle += 1
                 await self.refresh()
+                await self.openRequested()
                 if cycle % 36 == 0 { await self.fetchRemotes() }
                 if cycle % 12 == 0 {
                     await self.refreshFindings()
@@ -70,6 +84,21 @@ final class AppModel: ObservableObject {
                 }
             }
         }
+    }
+
+    private func refreshAgents() async {
+        guard let current = state, let agents = try? await Core.run({ try $0.agents() }), agents != current.agents else { return }
+        state?.agents = agents
+        if let state { notifyTransitions(state) }
+    }
+
+    private func refreshProposal() async {
+        let current = try? await Core.run { $0.currentProposal() }
+        if current != proposal { proposal = current }
+    }
+
+    private func expireHomeAgentAsk() {
+        if let asked = homeAgentAskedAt, Date().timeIntervalSince(asked) > 45 { homeAgentAskedAt = nil }
     }
 
     func refresh() async {
@@ -101,7 +130,7 @@ final class AppModel: ObservableObject {
             let agent = transition.agent
             let live = new.tramas.first(where: { $0.slug == agent.trama })
             let path = live?.status(for: agent.repo)?.path ?? agent.cwd
-            Notifier.shared.post(transition, tramaTitle: live?.title ?? agent.trama, path: path)
+            Notifier.shared.post(transition, tramaTitle: agent.isHome ? "Agent geral" : live?.title ?? agent.trama, path: path)
         }
     }
 
@@ -237,7 +266,14 @@ final class AppModel: ObservableObject {
     var active: [LiveTrama] { visibleTramas.filter { $0.isActive } }
     var parked: [LiveTrama] { visibleTramas.filter { $0.isParked } }
     var repos: [RepoConfig] { state?.repos ?? [] }
-    var activeAgents: [Agent] { state?.agents ?? [] }
+    var activeAgents: [Agent] { (state?.agents ?? []).filter { !$0.isHome } }
+    var homeAgent: Agent? { state?.agents.first { $0.isHome } }
+    var homeAgentState: String? {
+        if let since = homeAgentAskedAt, homeAgent.map({ $0.updatedAt < Int64(since.timeIntervalSince1970) || $0.state == AgentState.open }) ?? true {
+            return AgentState.working
+        }
+        return homeAgent?.state
+    }
 
     var selectedTrama: LiveTrama? {
         guard case .trama(let slug)? = screen else { return nil }
@@ -500,6 +536,69 @@ final class AppModel: ObservableObject {
         }
         parts += extraDirs.flatMap { ["--add-dir", shellQuoted($0)] }
         return parts.joined(separator: " ")
+    }
+
+    func openRequested() async {
+        let slug = try? await Core.run { $0.takeOpenRequest() }
+        guard let slug = slug ?? nil, let live = state?.tramas.first(where: { $0.slug == slug }) else { return }
+        select(slug)
+        openClaudeInAll(live)
+    }
+
+    private var homeSessionIsAlive: TerminalSession? {
+        guard let id = homeSessionID, homeAgent != nil || homeAgentAskedAt != nil else { return nil }
+        return terminals.sessions.first { $0.id == id && $0.running }
+    }
+
+    func askHomeAgent(_ request: String) {
+        let text = request.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty, let root = state?.root else { return }
+        homeAgentAskedAt = Date()
+        if let session = homeSessionIsAlive {
+            session.engine.submit(HomeAgent.followUp(request: text))
+            terminals.selectedID = session.id
+            terminals.expanded = true
+            return
+        }
+        guard let exe = Integration.embeddedCommand else {
+            homeAgentAskedAt = nil
+            showError("não encontrei o executável do app")
+            return
+        }
+        let command: String
+        do {
+            command = try HomeAgent.command(prompt: HomeAgent.prompt(request: text, executable: exe), stateDir: Paths.join(root, ".trama"))
+        } catch {
+            homeAgentAskedAt = nil
+            showError(errorMessage(error))
+            return
+        }
+        homeSessionID = terminals.open(path: root, command: command, title: HomeAgent.terminalTitle, blocks: false)
+    }
+
+    func refineProposal(_ text: String) {
+        let note = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !note.isEmpty else { return }
+        askHomeAgent("Ajuste a proposta atual e envie outra com `propor`: \(note)")
+    }
+
+    func discardProposal() {
+        proposal = nil
+        Task { try? await Core.run { $0.clearProposal() } }
+    }
+
+    func approveProposal() async {
+        guard let p = proposal else { return }
+        if p.isNew {
+            let options = NewTramaOptions(title: p.title, repos: [p.repos.joined(separator: ",")], base: p.base ?? "", task: p.task ?? "", goal: p.goal, context: nil)
+            guard await newTrama(options, openAgents: true) else { return }
+        } else {
+            guard let slug = p.trama else { return }
+            guard await perform(success: "Proposta aplicada em “\(p.title)”", { try $0.approveExisting(p) }) else { return }
+            select(slug)
+            if let live = state?.tramas.first(where: { $0.slug == slug }) { openClaudeInAll(live) }
+        }
+        discardProposal()
     }
 
     func openClaude(path: String, title: String, resume: ClaudeResume) {

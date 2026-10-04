@@ -27,6 +27,16 @@ final class FlowTests: XCTestCase {
         XCTAssertEqual(w2.config.context, lab.repos["rebocs-context"])
     }
 
+    func testOpenRequestIsConsumedOnce() throws {
+        let w = try lab.workspace()
+        let (t, _) = try w.newTrama(NewTramaOptions(title: "Pedido de abertura", repos: ["api"]))
+        XCTAssertNil(w.takeOpenRequest())
+        XCTAssertThrowsError(try w.requestOpen("nao-existe"))
+        try w.requestOpen(t.slug)
+        XCTAssertEqual(w.takeOpenRequest(), t.slug)
+        XCTAssertNil(w.takeOpenRequest())
+    }
+
     func testFullFlow() throws {
         let w = try lab.workspace()
         let repos = lab.repos
@@ -108,6 +118,13 @@ final class FlowTests: XCTestCase {
         XCTAssertEqual(ags[0].state, AgentState.done)
         XCTAssertEqual(ags[0].message, "Pronto: tela criada.")
         XCTAssertEqual(try w.handleHook(HookInput(session: "fora", event: "SessionStart", cwd: repos["rebocs_api"]!), now: now), "", "fora de uma trama o hook fica quieto")
+        XCTAssertEqual(try w.handleHook(HookInput(session: "geral", event: "SessionStart", cwd: w.root), now: now), "", "o agente geral não recebe contexto de trama")
+        try w.handleHook(HookInput(session: "geral", event: "UserPromptSubmit", cwd: w.root, userPrompt: "melhora a home"), now: now)
+        let home = try XCTUnwrap(try w.agents().first(where: { $0.isHome }))
+        XCTAssertEqual(home.state, AgentState.working)
+        XCTAssertEqual(home.trama, "")
+        try w.handleHook(HookInput(session: "geral", event: "SessionEnd", cwd: w.root), now: now)
+        XCTAssertNil(try w.agents().first(where: { $0.isHome }))
         XCTAssertEqual(try w.confirmHandoffs(t.slug, to: "rebocs-admin"), 1)
         capsule = try w.readCapsule(t.slug)
         XCTAssertEqual(capsule.decisions.count, 1)

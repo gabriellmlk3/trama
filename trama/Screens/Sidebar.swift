@@ -6,13 +6,21 @@ struct Sidebar: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
-            HStack(spacing: 9) {
-                TramaLogo(size: 22)
-                Text("trama")
-                    .font(Theme.serif(28).italic())
-                Spacer()
+            Button {
+                model.screen = .home
+            } label: {
+                HStack(spacing: 9) {
+                    TramaLogo(size: 22)
+                    Text("trama")
+                        .font(Theme.serif(28).italic())
+                        .foregroundStyle(Theme.text)
+                    Spacer()
+                }
+                .contentShape(Rectangle())
             }
+            .buttonStyle(.plain)
             .padding(.horizontal, 6)
+            .help("Início")
 
             Button {
                 model.showingNewTrama = true
@@ -191,6 +199,7 @@ struct HomeItem: View {
                 Text("Início")
                     .font(.system(size: 13, weight: selected ? .medium : .regular))
                 Spacer()
+                KeyCap(text: "⌘0")
             }
             .foregroundStyle(selected ? Theme.text : Theme.text2)
             .padding(.horizontal, 10)

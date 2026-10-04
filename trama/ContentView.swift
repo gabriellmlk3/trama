@@ -54,8 +54,10 @@ struct DetailView: View {
             if let t = model.selectedTrama {
                 TramaDetailView(trama: t)
             } else {
-                EmptyStateView()
+                HomeView()
             }
+        case .home?, nil:
+            HomeView()
         }
     }
 }
@@ -94,14 +96,19 @@ struct HomeHero: View {
                         KeyCap(text: "⌘N", dark: true)
                     }
                 }
-                .buttonStyle(EmberButton())
-                .disabled(model.repos.isEmpty)
-                if model.repos.isEmpty {
-                    Button("Cadastrar repositórios…") {
-                        let folders = Terminal.choosePaths(multiple: true, title: "Escolha os repositórios que podem entrar em tramas")
-                        Task { await model.addRepos(folders) }
-                    }
-                    .buttonStyle(GhostButton())
+            }
+            .buttonStyle(EmberButton())
+            .disabled(model.repos.isEmpty)
+            if !model.repos.isEmpty {
+                if let proposal = model.proposal {
+                    HomeProposalCard(proposal: proposal)
+                }
+                HomeAgentBox()
+            }
+            if model.repos.isEmpty {
+                Button("Cadastrar repositórios…") {
+                    let folders = Terminal.choosePaths(multiple: true, title: "Escolha os repositórios que podem entrar em tramas")
+                    Task { await model.addRepos(folders) }
                 }
             }
         }

@@ -41,6 +41,9 @@ struct TramaApp: App {
                     .keyboardShortcut("n")
             }
             CommandMenu("Trama") {
+                Button("Início") { model.screen = .home }
+                    .keyboardShortcut("0")
+                Divider()
                 Button("Abrir no Claude") {
                     if let t = model.selectedTrama { model.openClaudeInAll(t) }
                 }

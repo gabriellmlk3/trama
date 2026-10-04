@@ -21,6 +21,10 @@ extension CLI {
                             usage: "trama sugestao [ls] [--trama x] [--json]\n  trama sugestao aceitar <n> [--trama x] [--sem-fetch]\n  trama sugestao dispensar <n> [--trama x]",
                             valueFlags: ["trama"], run: cmdSuggestion),
         "soltar": Command(summary: "tira um repositório da trama (a branch continua)", usage: "trama soltar <trama> <repo> [--forcar]", valueFlags: [], run: cmdDrop),
+        "propor": Command(summary: "propõe ao usuário uma trama nova ou o uso de uma existente (ele aprova no app)",
+                         usage: "trama propor nova \"Título\" --repos a,b --objetivo \"...\" [--base x] [--tarefa y] [--motivo z]\n  trama propor existente <trama> [--repos a,b] [--para repo --handoff \"texto\"] [--motivo z]",
+                         valueFlags: ["repos", "objetivo", "base", "tarefa", "motivo", "para", "handoff"], run: cmdPropose),
+        "abrir": Command(summary: "pede ao app para abrir o Claude Code numa trama", usage: "trama abrir <trama>", valueFlags: [], run: cmdOpen),
         "estacionar": Command(summary: "pausa uma trama (os worktrees ficam intactos)", usage: "trama estacionar [trama]", valueFlags: [], run: cmdPark),
         "retomar": Command(summary: "reativa uma trama, com rebase opcional na base", usage: "trama retomar <trama> [--rebase] [--sem-fetch]", valueFlags: [], run: cmdResume),
         "arquivar": Command(summary: "remove os worktrees e arquiva a trama (branches ficam)", usage: "trama arquivar <trama> [--forcar]", valueFlags: [], run: cmdArchive),
@@ -365,6 +369,31 @@ extension CLI {
         guard a.positionals.count >= 2 else { throw TramaError("uso: trama soltar <trama> <repo>") }
         let t = try w.dropRepo(a.positionals[0], a.positionals[1], force: a.has("forcar"))
         c.ok("\(t.title) agora tem \(t.repos.joined(separator: ", "))")
+    }
+
+    static func cmdPropose(_ c: Context, _ a: Arguments) throws {
+        let w = try c.open()
+        let repos = a.value("repos").map { [$0] } ?? []
+        let reason = a.value("motivo") ?? ""
+        let proposal: Proposal
+        switch a.positional(0) {
+        case Proposal.new?:
+            proposal = try w.proposeNew(title: a.text(from: 1), repos: repos, goal: a.value("objetivo") ?? "", base: a.value("base"), task: a.value("tarefa"), reason: reason)
+        case Proposal.existing?:
+            guard let slug = a.positional(1) else { throw TramaError("uso: trama propor existente <trama> [--repos a,b] [--para repo --handoff \"texto\"]") }
+            proposal = try w.proposeExisting(slug: slug, extraRepos: repos, handoffRepo: a.value("para"), handoffText: a.value("handoff"), reason: reason)
+        default:
+            throw TramaError("uso: trama propor nova|existente ... (veja `trama propor --ajuda`)")
+        }
+        if c.json { return try c.emitJSON(proposal) }
+        c.ok("proposta enviada ao app: \(proposal.title) · o usuário aprova, ajusta ou descarta na home. Não crie nada; espere.")
+    }
+
+    static func cmdOpen(_ c: Context, _ a: Arguments) throws {
+        let w = try c.open()
+        guard let slug = a.positional(0) else { throw TramaError("uso: trama abrir <trama>") }
+        try w.requestOpen(slug)
+        c.ok("pedido enviado: o app abre o Claude Code em \(slug) em instantes")
     }
 
     static func cmdPark(_ c: Context, _ a: Arguments) throws {
@@ -745,7 +774,7 @@ extension CLI {
         let list = try w.agents()
         if c.json { return try c.emitJSON(list) }
         guard !list.isEmpty else { return c.line("Nenhum agente rodando em tramas agora.") }
-        c.text(table(list.map { [$0.trama, $0.repo, describe($0), relativeTime($0.updatedAt)] }))
+        c.text(table(list.map { [$0.isHome ? "(geral)" : $0.trama, $0.repo, describe($0), relativeTime($0.updatedAt)] }))
     }
 
 
