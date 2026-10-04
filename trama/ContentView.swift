@@ -32,6 +32,8 @@ struct ContentView: View {
         }
         .sheet(item: $model.agentDialog) { t in
             TramaAgentDialog(slug: t.slug)
+        .sheet(isPresented: $model.showingOnboarding) {
+            OnboardingView()
                 .environmentObject(model)
         }
         .sheet(item: $model.resuming) { t in
