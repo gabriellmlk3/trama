@@ -27,6 +27,7 @@ final class AppModel: ObservableObject {
     @Published var busy = false
     @Published var showingNewTrama = false
     @Published var showingOnboarding = false
+    @Published var onboardingPages = OnboardingPage.all
     @Published var resuming: LiveTrama?
 
     let terminals = TerminalStore()
@@ -66,6 +67,7 @@ final class AppModel: ObservableObject {
         loop = Task { [weak self] in
             DispatchQueue.global(qos: .utility).async { Integration.sync() }
             await self?.refresh()
+            self?.showOnboardingNews()
             await self?.fetchRemotes()
             await self?.refreshFindings()
             await self?.refreshPullRequests()
@@ -328,6 +330,40 @@ final class AppModel: ObservableObject {
             if openAgents, let live = selectedTrama {
                 openClaudeInAll(live)
             }
+            return true
+        } catch {
+            showError(errorMessage(error))
+            return false
+        }
+    }
+
+    func showOnboarding() {
+        onboardingPages = OnboardingPage.all
+        showingOnboarding = true
+    }
+
+    func showOnboardingNews() {
+        let seen = OnboardingPreference.seenVersion()
+        guard !needsSetup, seen > 0 else { return }
+        let news = OnboardingPreference.pages(seenVersion: seen)
+        guard !news.isEmpty else { return }
+        onboardingPages = news
+        showingOnboarding = true
+    }
+
+    func createSampleTrama() async -> Bool {
+        if let existing = visibleTramas.first(where: { $0.slug == Workspace.sampleSlug }) {
+            select(existing.slug)
+            showNotice("A trama de exemplo já existe")
+            return true
+        }
+        busy = true
+        defer { busy = false }
+        do {
+            let result = try await Core.run { try $0.createSampleTrama() }
+            await refresh()
+            select(result.trama.slug)
+            showNotice("Trama de exemplo criada · remova pelo menu ⋯ quando terminar")
             return true
         } catch {
             showError(errorMessage(error))
@@ -603,8 +639,8 @@ final class AppModel: ObservableObject {
             }
             await refresh()
             await refreshFindings()
-            if !UserDefaults.standard.bool(forKey: OnboardingPreference.seen) {
-                showingOnboarding = true
+            if OnboardingPreference.seenVersion() == 0 {
+                showOnboarding()
             }
             return true
         } catch {

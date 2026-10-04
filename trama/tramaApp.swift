@@ -43,7 +43,8 @@ struct TramaApp: App {
             CommandMenu("Trama") {
                 Button("Início") { model.screen = .home }
                     .keyboardShortcut("0")
-                Button("Introdução") { model.showingOnboarding = true }
+                Button("Introdução") { model.showOnboarding() }
+                Button("Mostrar dicas de novo") { TipPreference.resetAll() }
                 Divider()
                 Button("Abrir no Claude") {
                     if let t = model.selectedTrama { model.openClaudeInAll(t) }
