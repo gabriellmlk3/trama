@@ -32,6 +32,7 @@ extension CLI {
         "preparar": Command(summary: "refaz o preparo dos worktrees (copia arquivos e roda a receita do repositório)", usage: "trama preparar <trama> [repo]", valueFlags: [], run: cmdPrepare),
         "caminho": Command(summary: "imprime a pasta da trama ou de um repositório nela", usage: "trama caminho <trama> [repo]", valueFlags: [], run: cmdPath),
         "onde": Command(summary: "diz em qual trama e repositório você está", usage: "trama onde", valueFlags: [], run: cmdWhere),
+        "vscode": Command(summary: "gera o .code-workspace da trama (todos os repositórios numa janela do VS Code)", usage: "trama vscode [trama] [--abrir]", valueFlags: [], run: cmdCode),
         "capsula": Command(summary: "mostra a cápsula da trama", usage: "trama capsula [trama] [--json]", valueFlags: [], run: cmdCapsule),
         "contexto": Command(summary: "define o repositório de contexto de uma trama", usage: "trama contexto <pasta|global> [--trama x]", valueFlags: ["trama"], run: cmdContext),
         "objetivo": Command(summary: "define o objetivo da trama", usage: "trama objetivo \"texto\" [--trama x]", valueFlags: ["trama"], run: cmdGoal),
@@ -487,6 +488,17 @@ extension CLI {
         c.line("\(t.title) (\(t.slug))" + (r.map { " · \($0.name)" } ?? ""))
     }
 
+
+    static func cmdCode(_ c: Context, _ a: Arguments) throws {
+        let w = try c.open()
+        let t = try c.targetTrama(w, a.positional(0)).trama
+        if a.has("abrir") {
+            let launch = try w.codeWorkspaceLaunch(t.slug)
+            try EditorDetection.launch(launch.path, app: launch.app)
+            return c.ok("\(t.title) aberta no \(launch.app)")
+        }
+        c.line(try w.writeCodeWorkspace(t.slug))
+    }
 
     static func cmdCapsule(_ c: Context, _ a: Arguments) throws {
         let w = try c.open()

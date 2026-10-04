@@ -40,12 +40,12 @@ struct GitRepoDetail: View {
             if let o = overview {
                 ViewThatFits(in: .horizontal) {
                     HStack(alignment: .top, spacing: 14) {
-                        BranchThread(overview: o, status: status, repo: repo.name, worktree: path, compare: compare, onCompare: onCompare, trama: trama)
+                        BranchThread(overview: o, status: status, trama: trama, repo: repo.name, worktree: path, compare: compare, onCompare: onCompare)
                         WorktreesCard(overview: o, repo: repo, trama: trama)
                             .frame(width: 300)
                     }
                     VStack(spacing: 14) {
-                        BranchThread(overview: o, status: status, repo: repo.name, worktree: path, compare: compare, onCompare: onCompare, trama: trama)
+                        BranchThread(overview: o, status: status, trama: trama, repo: repo.name, worktree: path, compare: compare, onCompare: onCompare)
                         WorktreesCard(overview: o, repo: repo, trama: trama)
                     }
                 }
@@ -267,11 +267,7 @@ struct WorktreesCard: View {
     let trama: LiveTrama
     @State private var pending: (from: WorktreeSummary, into: WorktreeSummary)?
     @State private var resolvingIn: WorktreeSummary?
-    @State private var pending: (from: WorktreeSummary, into: WorktreeSummary)?
-    @State private var resolvingIn: WorktreeSummary?
     @State private var pickingBranchFor: WorktreeSummary?
-    @State private var pickingBranch = false
-    @State private var pendingBranch: String?
     @State private var pickingBranch = false
     @State private var pendingBranch: String?
 
@@ -345,16 +341,7 @@ struct WorktreesCard: View {
                                     .foregroundStyle(w.changed > 0 ? Theme.text3 : Theme.faded)
                             }
                             if !w.branch.isEmpty {
-                                Menu {
-                                    if !current(w), let mine = overview.worktrees.first(where: current), !mine.branch.isEmpty {
-                                        Button("Mesclar \(mine.branch) em \(w.branch)") { pending = (mine, w) }
-                                        Button("Trazer \(w.branch) para \(mine.branch)") { pending = (w, mine) }
-                                        Divider()
-                                    }
-                                    if current(w) {
-                                        Button("Trazer outra branch para \(w.branch)…") { pickingBranch = true }
-                                    }
-                                } label: {
+                                AppMenu(width: 280) {
                                     Image(systemName: "arrow.triangle.merge")
                                         .font(.system(size: 11.5))
                                         .foregroundStyle(Theme.text2)
@@ -362,10 +349,17 @@ struct WorktreesCard: View {
                                         .background(RoundedRectangle(cornerRadius: 7).fill(Theme.surface))
                                         .overlay(RoundedRectangle(cornerRadius: 7).stroke(Theme.line2, lineWidth: 1))
                                         .contentShape(Rectangle())
+                                } content: {
+                                    if !current(w), let mine = overview.worktrees.first(where: current), !mine.branch.isEmpty {
+                                        MenuAction("Mesclar \(mine.branch) em \(w.branch)") { pending = (mine, w) }
+                                        MenuAction("Trazer \(w.branch) para \(mine.branch)") { pending = (w, mine) }
+                                        MenuDivider()
+                                    }
+                                    if current(w) {
+                                        MenuAction("Trazer outra branch para \(w.branch)…") { pickingBranch = true }
+                                    }
                                 }
-                                .menuStyle(.button)
                                 .buttonStyle(.plain)
-                                .menuIndicator(.hidden)
                                 .fixedSize()
                                 .help("Fazer merge em \(title(w))")
                             }
@@ -391,47 +385,45 @@ struct WorktreesCard: View {
                 BranchPickerSheet(repo: repo.name, worktree: mine.path, into: mine.branch) { pendingBranch = $0 }
             }
         }
-        .alert("Trazer branch?", isPresented: Binding(get: { pendingBranch != nil }, set: { if !$0 { pendingBranch = nil } })) {
-            Button("Fazer merge") {
-                if let b = pendingBranch, let mine = overview.worktrees.first(where: current) {
-                    Task { await model.mergeBranch(repo.name, ref: b, into: mine.path, label: title(mine)) }
-                }
-                pendingBranch = nil
-            }
-            Button("Mesclar e resolver conflitos") {
-                if let b = pendingBranch, let mine = overview.worktrees.first(where: current) {
-                    Task { await model.mergeBranch(repo.name, ref: b, into: mine.path, label: title(mine), allowConflicts: true) }
-                }
-                pendingBranch = nil
-            }
-            Button("Cancelar", role: .cancel) { pendingBranch = nil }
-        } message: {
-            if let b = pendingBranch {
-                Text("Mescla \(b) em \(overview.worktrees.first(where: current)?.branch ?? "esta trama"). Se o merge previr conflito, “Fazer merge” não mescla nada; “Mesclar e resolver conflitos” deixa o merge em andamento para você resolver aqui.")
-            }
-        }
+        .appDialog(
+            "Trazer branch?",
+            isPresented: Binding(get: { pendingBranch != nil }, set: { if !$0 { pendingBranch = nil } }),
+            message: pendingBranch.map { "Mescla \($0) em \(overview.worktrees.first(where: current)?.branch ?? "esta trama"). Se o merge previr conflito, “Fazer merge” não mescla nada; “Mesclar e resolver conflitos” deixa o merge em andamento para você resolver aqui." },
+            actions: [
+                DialogAction("Fazer merge") {
+                    if let b = pendingBranch, let mine = overview.worktrees.first(where: current) {
+                        Task { await model.mergeBranch(repo.name, ref: b, into: mine.path, label: title(mine)) }
+                    }
+                },
+                DialogAction("Mesclar e resolver conflitos") {
+                    if let b = pendingBranch, let mine = overview.worktrees.first(where: current) {
+                        Task { await model.mergeBranch(repo.name, ref: b, into: mine.path, label: title(mine), allowConflicts: true) }
+                    }
+                },
+            ]
+        )
         .sheet(item: $resolvingIn) { w in
             ConflictsSheet(repo: repo.name, worktree: w.path, title: title(w))
         }
-        .alert("Fazer merge?", isPresented: Binding(get: { pending != nil }, set: { if !$0 { pending = nil } })) {
-            Button("Fazer merge") {
-                if let p = pending {
-                    Task { await model.mergeWorktree(repo.name, from: p.from.path, into: p.into.path, label: title(p.into)) }
-                }
-                pending = nil
-            }
-            Button("Mesclar e resolver conflitos") {
-                if let p = pending {
-                    Task { await model.mergeWorktree(repo.name, from: p.from.path, into: p.into.path, label: title(p.into), allowConflicts: true) }
-                }
-                pending = nil
-            }
-            Button("Cancelar", role: .cancel) { pending = nil }
-        } message: {
-            if let p = pending {
-                Text("Mescla \(p.from.branch) em \(p.into.branch) (\(title(p.into))). Se o merge previr conflito, “Fazer merge” não mescla nada; “Mesclar e resolver conflitos” deixa o merge em andamento para você resolver aqui." + (p.into.changed > 0 ? " Esse worktree tem \(p.into.changed) \(plural(p.into.changed, "alteração", "alterações")) não commitada(s): o Git só recusa se elas tocarem os mesmos arquivos." : ""))
-            }
-        }
+        .appDialog(
+            "Fazer merge?",
+            isPresented: Binding(get: { pending != nil }, set: { if !$0 { pending = nil } }),
+            message: pending.map { p in
+                "Mescla \(p.from.branch) em \(p.into.branch) (\(title(p.into))). Se o merge previr conflito, “Fazer merge” não mescla nada; “Mesclar e resolver conflitos” deixa o merge em andamento para você resolver aqui." + (p.into.changed > 0 ? " Esse worktree tem \(p.into.changed) \(plural(p.into.changed, "alteração", "alterações")) não commitada(s): o Git só recusa se elas tocarem os mesmos arquivos." : "")
+            },
+            actions: [
+                DialogAction("Fazer merge") {
+                    if let p = pending {
+                        Task { await model.mergeWorktree(repo.name, from: p.from.path, into: p.into.path, label: title(p.into)) }
+                    }
+                },
+                DialogAction("Mesclar e resolver conflitos") {
+                    if let p = pending {
+                        Task { await model.mergeWorktree(repo.name, from: p.from.path, into: p.into.path, label: title(p.into), allowConflicts: true) }
+                    }
+                },
+            ]
+        )
     }
 }
 
@@ -470,65 +462,158 @@ struct BranchPickerSheet: View {
     @State private var branches: [String] = []
     @State private var loading = true
     @State private var query = ""
+    @FocusState private var searchFocused: Bool
 
     var filtered: [String] {
         let q = query.trimmingCharacters(in: .whitespaces)
         return q.isEmpty ? branches : branches.filter { $0.localizedCaseInsensitiveContains(q) }
     }
 
+    var localBranches: [String] { filtered.filter { !$0.hasPrefix("origin/") } }
+    var remoteBranches: [String] { filtered.filter { $0.hasPrefix("origin/") } }
+
+    func pick(_ branch: String) {
+        dismiss()
+        onPick(branch)
+    }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Text(title ?? "Trazer branch para \(into)")
-                    .font(.system(size: 14, weight: .semibold))
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(title ?? "Trazer branch")
+                        .font(.system(size: 14, weight: .semibold))
+                    if title == nil {
+                        HStack(spacing: 6) {
+                            Text("para")
+                                .font(.system(size: 11.5))
+                                .foregroundStyle(Theme.faded)
+                            Chip(text: into, color: Theme.emberText, background: Theme.emberDark)
+                        }
+                    }
+                }
                 Spacer()
                 Button("Fechar") { dismiss() }
                     .buttonStyle(GhostButton(compact: true))
                     .keyboardShortcut(.cancelAction)
             }
-            TextField("Buscar branch", text: $query)
-                .textFieldStyle(.roundedBorder)
-            if loading {
-                ProgressView().controlSize(.small).frame(maxWidth: .infinity, minHeight: 120)
-            } else if filtered.isEmpty {
-                Text("Nenhuma branch encontrada.")
-                    .font(.system(size: 12))
-                    .foregroundStyle(Theme.faded)
-                    .frame(maxWidth: .infinity, minHeight: 120)
-            } else {
-                ScrollView {
-                    LazyVStack(spacing: 2) {
-                        ForEach(filtered, id: \.self) { b in
-                            Button {
-                                dismiss()
-                                onPick(b)
-                            } label: {
-                                Text(b)
-                                    .font(Theme.mono(12))
-                                    .foregroundStyle(Theme.text2)
-                                    .lineLimit(1)
-                                    .truncationMode(.middle)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                    .padding(.horizontal, 10)
-                                    .padding(.vertical, 6)
-                                    .contentShape(Rectangle())
-                            }
-                            .buttonStyle(.plain)
-                        }
-                    }
-                }
-            }
+            searchField
+            content
         }
         .padding(20)
-        .frame(minWidth: 420, minHeight: 360)
+        .frame(minWidth: 460, minHeight: 420)
         .background(Theme.background)
         .task {
             let list = (try? await Core.run { try $0.mergeableBranches(repo: repo, worktree: worktree) }) ?? []
             branches = list
             loading = false
+            searchFocused = true
+        }
+    }
+
+    var searchField: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "magnifyingglass")
+                .font(.system(size: 12))
+                .foregroundStyle(Theme.faded)
+            TextField("Buscar branch", text: $query)
+                .textFieldStyle(.plain)
+                .font(.system(size: 13))
+                .focused($searchFocused)
+                .onSubmit { if let first = filtered.first { pick(first) } }
+            if !query.isEmpty {
+                Button { query = "" } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 12))
+                        .foregroundStyle(Theme.faded)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(.horizontal, 12)
+        .frame(height: 36)
+        .background(RoundedRectangle(cornerRadius: 9).fill(Theme.field))
+        .overlay(RoundedRectangle(cornerRadius: 9).stroke(searchFocused ? Theme.ember.opacity(0.6) : Theme.line2, lineWidth: 1))
+    }
+
+    @ViewBuilder
+    var content: some View {
+        if loading {
+            ProgressView().controlSize(.small).frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else if filtered.isEmpty {
+            VStack(spacing: 8) {
+                Image(systemName: "arrow.triangle.branch")
+                    .font(.system(size: 20))
+                    .foregroundStyle(Theme.thread)
+                Text("Nenhuma branch encontrada.")
+                    .font(.system(size: 12))
+                    .foregroundStyle(Theme.faded)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else {
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 2) {
+                    group("Locais", localBranches)
+                    group("Remotas", remoteBranches)
+                }
+                .padding(6)
+            }
+            .background(RoundedRectangle(cornerRadius: 10).fill(Theme.panel))
+            .overlay(RoundedRectangle(cornerRadius: 10).stroke(Theme.line, lineWidth: 1))
+        }
+    }
+
+    @ViewBuilder
+    func group(_ label: String, _ items: [String]) -> some View {
+        if !items.isEmpty {
+            HStack(spacing: 6) {
+                SectionLabel(text: label)
+                Text("\(items.count)")
+                    .font(Theme.mono(10.5))
+                    .foregroundStyle(Theme.thread)
+            }
+            .padding(.horizontal, 10)
+            .padding(.top, 8)
+            .padding(.bottom, 4)
+            ForEach(items, id: \.self) { b in
+                BranchRow(name: b) { pick(b) }
+            }
         }
     }
 }
+
+private struct BranchRow: View {
+    let name: String
+    let action: () -> Void
+    @State private var hovering = false
+
+    var remotePrefix: String? { name.hasPrefix("origin/") ? "origin/" : nil }
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 9) {
+                Image(systemName: remotePrefix == nil ? "arrow.triangle.branch" : "cloud")
+                    .font(.system(size: 11))
+                    .foregroundStyle(hovering ? Theme.ember : Theme.faded)
+                    .frame(width: 16)
+                (Text(remotePrefix ?? "").foregroundColor(Theme.faded)
+                    + Text(String(name.dropFirst(remotePrefix?.count ?? 0))).foregroundColor(Theme.text2))
+                    .font(Theme.mono(12))
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                Spacer(minLength: 0)
+                if hovering {
+                    Image(systemName: "return")
+                        .font(.system(size: 10))
+                        .foregroundStyle(Theme.faded)
+                }
+            }
+            .padding(.horizontal, 10)
+            .frame(height: 30)
+            .background(RoundedRectangle(cornerRadius: 7).fill(hovering ? Theme.surface2 : .clear))
+            .contentShape(Rectangle())
         }
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
     }
 }

@@ -44,16 +44,18 @@ struct ConflictsPanel: View {
                 onChange()
             }
         }
-        .alert("Abortar o merge?", isPresented: $confirmingAbort) {
-            Button("Abortar merge", role: .destructive) {
-                Task {
-                    if await model.abortMerge(repo, worktree: worktree) { version += 1 }
-                }
-            }
-            Button("Cancelar", role: .cancel) {}
-        } message: {
-            Text("Volta o worktree ao estado anterior ao merge. As resoluções feitas até aqui serão descartadas.")
-        }
+        .appDialog(
+            "Abortar o merge?",
+            isPresented: $confirmingAbort,
+            message: "Volta o worktree ao estado anterior ao merge. As resoluções feitas até aqui serão descartadas.",
+            actions: [
+                DialogAction("Abortar merge", role: .destructive) {
+                    Task {
+                        if await model.abortMerge(repo, worktree: worktree) { version += 1 }
+                    }
+                },
+            ]
+        )
     }
 
     func card(_ c: ConflictState) -> some View {

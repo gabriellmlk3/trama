@@ -33,6 +33,11 @@ enum Theme {
     static let wait = Color(hex: 0xF2C14E)
     static let waitText = Color(hex: 0xF5D98A)
 
+    static let ansi: [UInt32] = [
+        0x1A1C22, 0xEF6F6C, 0x62D394, 0xF2C14E, 0x7C9CFF, 0xC792EA, 0x5FD1D1, 0xD5D7DC,
+        0x4A4E57, 0xF4A3A1, 0x8FE0B0, 0xF5D98A, 0xA9B4FF, 0xDDB6F2, 0x9DE3E3, 0xECEDEF,
+    ]
+
     static func serif(_ size: CGFloat) -> Font {
         if NSFont(name: "Instrument Serif", size: size) != nil {
             return .custom("Instrument Serif", size: size)

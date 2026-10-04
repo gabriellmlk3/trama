@@ -535,12 +535,12 @@ struct PullRequestSheet: View {
             .disabled(!planner.canSubmit || sending)
             .opacity(planner.canSubmit && !sending ? 1 : 0.5)
         }
-        .confirmationDialog("Mesclar direto, sem PR?", isPresented: $confirmingMerge) {
-            Button("Mesclar e enviar ao remoto", role: .destructive, action: submit)
-            Button("Cancelar", role: .cancel) {}
-        } message: {
-            Text(planner.selection.map { "\($0.repo) → \($0.target)" }.joined(separator: "\n"))
-        }
+        .appDialog(
+            "Mesclar direto, sem PR?",
+            isPresented: $confirmingMerge,
+            message: planner.selection.map { "\($0.repo) → \($0.target)" }.joined(separator: "\n"),
+            actions: [DialogAction("Mesclar e enviar ao remoto", role: .destructive, handler: submit)]
+        )
         .padding(.horizontal, 28)
         .padding(.vertical, 14)
         .background(Theme.panel)
@@ -1045,10 +1045,7 @@ private struct BranchPicker: View {
                     Text("a partir de")
                         .font(.system(size: 12))
                         .foregroundStyle(Theme.faded)
-                    Picker("", selection: $source) {
-                        ForEach(options) { Text($0.name).tag($0.name) }
-                    }
-                    .labelsHidden()
+                    AppPicker(selection: $source, options: options.map { (label: $0.name, value: $0.name) }, width: 240, mono: true)
                 }
             }
             scopeNote
@@ -1155,25 +1152,24 @@ private struct BranchPicker: View {
         HStack(spacing: 2) {
             pickButton(option)
             if !defaultNames.contains(option.name) {
-                Menu {
-                    Button("Renomear…") {
-                        text = option.name
-                        problem = nil
-                        mode = .rename(option.name)
-                    }
-                    Button("Excluir…", role: .destructive) {
-                        problem = nil
-                        mode = .delete(option.name)
-                    }
-                } label: {
+                AppMenu(width: 180) {
                     Image(systemName: "ellipsis")
                         .font(.system(size: 12))
                         .foregroundStyle(Theme.faded)
                         .frame(width: 30, height: 30)
                         .contentShape(Rectangle())
+                } content: {
+                    MenuAction("Renomear…") {
+                        text = option.name
+                        problem = nil
+                        mode = .rename(option.name)
+                    }
+                    MenuAction("Excluir…", destructive: true) {
+                        problem = nil
+                        mode = .delete(option.name)
+                    }
                 }
-                .menuStyle(.borderlessButton)
-                .menuIndicator(.hidden)
+                .buttonStyle(.plain)
                 .fixedSize()
             }
         }

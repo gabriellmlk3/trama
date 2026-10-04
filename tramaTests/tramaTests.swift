@@ -932,6 +932,20 @@ final class FlowTests: XCTestCase {
         XCTAssertNil(try w.repo("api").editor)
     }
 
+    func testCodeWorkspaceListsEveryWorktreeAndGoesAwayOnArchive() throws {
+        let w = try lab.workspace()
+        let (t, _) = try w.newTrama(NewTramaOptions(title: "Janela única", repos: ["api", "admin"], noFetch: true))
+        let path = try w.writeCodeWorkspace(t.slug)
+        XCTAssertEqual(path, w.tramaPath(t.slug) + "/" + t.slug + ".code-workspace")
+        let json = try JSONSerialization.jsonObject(with: Data(try XCTUnwrap(File.read(path)).utf8)) as? [String: Any]
+        let folders = try XCTUnwrap(json?["folders"] as? [[String: String]])
+        XCTAssertEqual(folders.map { $0["path"] }, t.repos)
+        XCTAssertEqual(folders.map { $0["name"] }, try t.repos.map { try w.repo($0).alias })
+        for folder in folders { XCTAssertTrue(Paths.isDirectory(w.tramaPath(t.slug) + "/" + (folder["path"] ?? ""))) }
+        _ = try w.archive(t.slug)
+        XCTAssertFalse(Paths.exists(path))
+    }
+
     func testFailureMidwayUndoesEverything() throws {
         let w = try lab.workspace()
         try FileManager.default.createDirectory(atPath: w.worktreePath("quebrada", "rebocs-admin"), withIntermediateDirectories: true)
@@ -1650,5 +1664,374 @@ final class GitAuthenticationTests: XCTestCase {
         }
         XCTAssertEqual(ToolInstaller.named("GitHub")?.id, "gh")
         XCTAssertNil(ToolInstaller.named("foo"))
+    }
+
+    func testClaudeSessionHistoryIsDetectedPerWorktree() throws {
+        let lab = try Lab()
+        defer { lab.cleanup() }
+        let worktree = lab.root + "/trama/app"
+        try FileManager.default.createDirectory(atPath: worktree, withIntermediateDirectories: true)
+        XCTAssertFalse(ClaudeSessions.hasHistory(at: worktree, home: lab.root))
+        let dir = ClaudeSessions.projectDirectory(for: worktree, home: lab.root)
+        try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        XCTAssertFalse(ClaudeSessions.hasHistory(at: worktree, home: lab.root))
+        try lab.write(dir + "/abc.jsonl", "{}\n")
+        XCTAssertTrue(ClaudeSessions.hasHistory(at: worktree, home: lab.root))
+        XCTAssertFalse(ClaudeSessions.hasHistory(at: lab.root + "/trama/outro", home: lab.root))
+    }
+
+    func testClaudeConversationsAreListedNewestFirstWithTitles() throws {
+        let lab = try Lab()
+        defer { lab.cleanup() }
+        let worktree = lab.root + "/trama/app"
+        try FileManager.default.createDirectory(atPath: worktree, withIntermediateDirectories: true)
+        let dir = ClaudeSessions.projectDirectory(for: worktree, home: lab.root)
+        try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        try lab.write(dir + "/velha.jsonl", "{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":\"primeira pergunta\\nsegunda linha\"}}\n")
+        try lab.write(dir + "/nova.jsonl", "{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":\"<command-name>x</command-name>\"}}\n{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":\"ignorada\"}}\n{\"type\":\"custom-title\",\"customTitle\":\"Título dado\"}\n")
+        try FileManager.default.setAttributes([.modificationDate: Date(timeIntervalSinceNow: -3600)], ofItemAtPath: dir + "/velha.jsonl")
+        let list = ClaudeSessions.conversations(at: worktree, home: lab.root)
+        XCTAssertEqual(list.map(\.id), ["nova", "velha"])
+        XCTAssertEqual(list.map(\.title), ["Título dado", "primeira pergunta"])
+    }
+}
+
+final class PTYTests: XCTestCase {
+    private final class Collector: @unchecked Sendable {
+        private let lock = NSLock()
+        private var bytes: [UInt8] = []
+
+        func add(_ chunk: [UInt8]) {
+            lock.lock()
+            bytes.append(contentsOf: chunk)
+            lock.unlock()
+        }
+
+        var text: String {
+            lock.lock()
+            defer { lock.unlock() }
+            return String(decoding: bytes, as: UTF8.self)
+        }
+    }
+
+    func testDeliversOutputAndExitCodeInOrder() throws {
+        let collector = Collector()
+        let exited = expectation(description: "saiu")
+        nonisolated(unsafe) var code: Int32?
+        let pty = try PTY(
+            executable: "/bin/sh",
+            arguments: ["sh", "-c", "printf trama-ok; exit 3"],
+            directory: NSTemporaryDirectory(),
+            columns: 80,
+            rows: 24,
+            onOutput: collector.add,
+            onExit: { value in
+                code = value
+                exited.fulfill()
+            }
+        )
+        wait(for: [exited], timeout: 5)
+        XCTAssertEqual(code, 3)
+        XCTAssertTrue(collector.text.contains("trama-ok"))
+        XCTAssertGreaterThan(pty.pid, 0)
+    }
+
+    func testStartsInDirectoryAndEchoesInput() throws {
+        let collector = Collector()
+        let exited = expectation(description: "saiu")
+        let directory = Paths.real(NSTemporaryDirectory())
+        let pty = try PTY(
+            executable: "/bin/sh",
+            arguments: ["sh"],
+            directory: directory,
+            columns: 80,
+            rows: 24,
+            onOutput: collector.add,
+            onExit: { _ in exited.fulfill() }
+        )
+        pty.write(Array("pwd; stty size; exit\n".utf8))
+        wait(for: [exited], timeout: 5)
+        XCTAssertTrue(collector.text.contains(directory.hasSuffix("/") ? String(directory.dropLast()) : directory))
+        XCTAssertTrue(collector.text.contains("24 80"))
+    }
+
+    func testResizeReachesChild() throws {
+        let collector = Collector()
+        let exited = expectation(description: "saiu")
+        let pty = try PTY(
+            executable: "/bin/sh",
+            arguments: ["sh"],
+            directory: nil,
+            columns: 80,
+            rows: 24,
+            onOutput: collector.add,
+            onExit: { _ in exited.fulfill() }
+        )
+        pty.resize(columns: 120, rows: 40)
+        pty.write(Array("stty size; exit\n".utf8))
+        wait(for: [exited], timeout: 5)
+        XCTAssertTrue(collector.text.contains("40 120"))
+    }
+
+    func testTerminateEndsTheProcess() throws {
+        let exited = expectation(description: "saiu")
+        let pty = try PTY(
+            executable: "/bin/sh",
+            arguments: ["sh", "-c", "sleep 30"],
+            directory: nil,
+            columns: 80,
+            rows: 24,
+            onOutput: { _ in },
+            onExit: { _ in exited.fulfill() }
+        )
+        pty.terminate()
+        wait(for: [exited], timeout: 5)
+    }
+}
+
+final class TerminalMarkersTests: XCTestCase {
+    private func bytes(_ text: String) -> [UInt8] { Array(text.utf8) }
+
+    func testParsesMarkersWithBellAndStringTerminators() {
+        let scanner = MarkerScanner()
+        let markers = scanner.feed(bytes("\u{1b}]133;A\u{07}ls\u{1b}]133;C\u{1b}\\\u{1b}]133;D;2\u{07}\u{1b}]133;D\u{07}"))
+        XCTAssertEqual(markers, [.promptStart, .commandStart, .commandFinished(exitCode: 2), .commandFinished(exitCode: nil)])
+    }
+
+    func testMarkersSplitAcrossChunksAreJoined() {
+        let scanner = MarkerScanner()
+        var markers = scanner.feed(bytes("texto\u{1b}]13"))
+        markers += scanner.feed(bytes("3;D;1"))
+        markers += scanner.feed(bytes("27\u{07}"))
+        XCTAssertEqual(markers, [.commandFinished(exitCode: 127)])
+    }
+
+    func testDirectoryIsDecodedAndHostDropped() {
+        let scanner = MarkerScanner()
+        XCTAssertEqual(scanner.feed(bytes("\u{1b}]7;file://maquina/Users/main/Meu%20Projeto\u{07}")), [.directory("/Users/main/Meu Projeto")])
+    }
+
+    func testCommandTextIsUnescaped() {
+        let scanner = MarkerScanner()
+        let markers = scanner.feed(bytes("\u{1b}]633;E;echo a\\x3b b\\x0aecho \\\\ç\u{07}"))
+        XCTAssertEqual(markers, [.commandText("echo a; b\necho \\ç")])
+    }
+
+    func testUnknownAndOversizedSequencesAreIgnored() {
+        let scanner = MarkerScanner()
+        let huge = String(repeating: "x", count: 20000)
+        XCTAssertEqual(scanner.feed(bytes("\u{1b}]0;titulo\u{07}\u{1b}]133;\(huge)\u{07}\u{1b}[31m\u{1b}]133;A\u{07}")), [.promptStart])
+    }
+
+    func testBlockLifecycleKeepsCommandDirectoryAndDuration() {
+        var tracker = BlockTracker()
+        let start = Date(timeIntervalSince1970: 1000)
+        tracker.apply(.directory("/tmp/a"), at: start)
+        tracker.apply(.commandFinished(exitCode: 0), at: start)
+        XCTAssertTrue(tracker.blocks.isEmpty)
+        tracker.apply(.commandText("make test"), at: start)
+        tracker.apply(.commandStart, at: start)
+        XCTAssertEqual(tracker.blocks.first?.isRunning, true)
+        tracker.apply(.commandFinished(exitCode: 2), at: start.addingTimeInterval(3.5))
+        XCTAssertEqual(tracker.blocks.count, 1)
+        XCTAssertEqual(tracker.blocks[0].command, "make test")
+        XCTAssertEqual(tracker.blocks[0].directory, "/tmp/a")
+        XCTAssertEqual(tracker.blocks[0].exitCode, 2)
+        XCTAssertEqual(tracker.blocks[0].duration, 3.5)
+    }
+}
+
+final class StreamRouterTests: XCTestCase {
+    private func bytes(_ text: String) -> [UInt8] { Array(text.utf8) }
+
+    func testBeforeTheFirstPromptEverythingIsOutput() {
+        let router = StreamRouter()
+        XCTAssertEqual(router.feed(bytes("carregando\r\n")), [.output(bytes("carregando\r\n"))])
+    }
+
+    func testOnlyBytesBetweenCommandStartAndEndAreOutput() {
+        let router = StreamRouter()
+        _ = router.feed(bytes("\u{1b}]133;A\u{07}% \u{1b}]133;B\u{07}"))
+        let events = router.feed(bytes("ls\r\n\u{1b}]633;E;ls\u{07}\u{1b}]133;C\u{07}a.txt\r\n\u{1b}[31mb\u{1b}[0m\r\n\u{1b}]133;D;0\u{07}\u{1b}]7;file://h/tmp\u{07}\u{1b}]133;A\u{07}% "))
+        XCTAssertEqual(events, [
+            .metadata(.commandText("ls")),
+            .commandBegan,
+            .metadata(.commandStart),
+            .output(bytes("a.txt\r\n\u{1b}[31mb\u{1b}[0m\r\n")),
+            .commandEnded(exitCode: 0),
+            .metadata(.commandFinished(exitCode: 0)),
+            .metadata(.directory("/tmp")),
+            .metadata(.promptStart),
+        ])
+    }
+
+    func testFirstPromptSignalsReadyOnlyOnce() {
+        let router = StreamRouter()
+        let first = router.feed(bytes("boas-vindas\u{1b}]133;A\u{07}"))
+        XCTAssertEqual(first, [.output(bytes("boas-vindas")), .sessionReady, .metadata(.promptStart)])
+        XCTAssertEqual(router.feed(bytes("\u{1b}]133;A\u{07}")), [.metadata(.promptStart)])
+    }
+
+    func testOtherEscapeSequencesAndSplitChunksPassThroughIntact() {
+        let router = StreamRouter()
+        _ = router.feed(bytes("\u{1b}]133;A\u{07}\u{1b}]133;C\u{07}"))
+        var output: [UInt8] = []
+        for chunk in ["x\u{1b}", "[2Ky\u{1b}]0;tit", "ulo\u{07}z\u{1b}]13", "3;D;1\u{07}"] {
+            for case .output(let part) in router.feed(bytes(chunk)) { output += part }
+        }
+        XCTAssertEqual(String(decoding: output, as: UTF8.self), "x\u{1b}[2Ky\u{1b}]0;titulo\u{07}z")
+    }
+}
+
+final class ZshIntegrationTests: XCTestCase {
+    func testRealZshProducesBlocksWithCommandStatusDirectoryAndDuration() throws {
+        let lab = try Lab()
+        defer { lab.cleanup() }
+        let home = lab.root + "/home"
+        let work = lab.root + "/trabalho com espaço"
+        try FileManager.default.createDirectory(atPath: home, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(atPath: work, withIntermediateDirectories: true)
+        try lab.write(home + "/.zshrc", "PS1='% '\nexport TRAMA_TESTE_RC=carregado\n")
+        let integration = lab.root + "/zsh"
+        try ShellIntegration.install(at: integration)
+
+        let scanner = MarkerScanner()
+        let lock = NSLock()
+        nonisolated(unsafe) var events: [(TerminalMarker, Date)] = []
+        nonisolated(unsafe) var output = ""
+        let exited = expectation(description: "saiu")
+        let environment = ["TERM=xterm-256color", "HOME=" + home, "USER=teste", "LANG=en_US.UTF-8"]
+            + ShellIntegration.environment(directory: integration, home: home)
+        let pty = try PTY(
+            executable: "/bin/zsh",
+            arguments: ["-il"],
+            environment: environment,
+            directory: work,
+            columns: 100,
+            rows: 30,
+            onOutput: { chunk in
+                let markers = scanner.feed(chunk)
+                lock.lock()
+                output += String(decoding: chunk, as: UTF8.self)
+                events += markers.map { ($0, Date()) }
+                lock.unlock()
+            },
+            onExit: { _ in exited.fulfill() }
+        )
+        pty.write(Array("echo $TRAMA_TESTE_RC\nls /nao/existe\nsleep 0.3\nfor i in 1 2; do\necho $i\ndone\ncd /tmp\nexit\n".utf8))
+        wait(for: [exited], timeout: 15)
+
+        var tracker = BlockTracker()
+        lock.lock()
+        for (marker, date) in events { tracker.apply(marker, at: date) }
+        let seenOutput = output
+        lock.unlock()
+
+        XCTAssertTrue(seenOutput.contains("carregado"), "o .zshrc do usuário precisa ser carregado")
+        XCTAssertEqual(tracker.blocks.map(\.command), ["echo $TRAMA_TESTE_RC", "ls /nao/existe", "sleep 0.3", "for i in 1 2; do\necho $i\ndone", "cd /tmp", "exit"])
+        XCTAssertEqual(tracker.blocks.map(\.exitCode).prefix(5), [0, 1, 0, 0, 0])
+        XCTAssertEqual(tracker.blocks[0].directory, Paths.real(work))
+        XCTAssertEqual(tracker.blocks[4].directory, Paths.real(work))
+        XCTAssertGreaterThanOrEqual(tracker.blocks[2].duration ?? 0, 0.25)
+        XCTAssertEqual(tracker.directory.map { Paths.real($0) }, Paths.real("/tmp"))
+    }
+}
+
+@MainActor
+final class TerminalEngineTests: XCTestCase {
+    private func waitUntil(_ condition: @autoclosure () -> Bool, timeout: TimeInterval = 15, _ message: String = "") async {
+        let limit = Date().addingTimeInterval(timeout)
+        while !condition(), Date() < limit {
+            try? await Task.sleep(nanoseconds: 20_000_000)
+        }
+        XCTAssertTrue(condition(), "tempo esgotado: \(message)")
+    }
+
+    func testEngineSplitsSessionIntoBlocksWithCapturedOutput() async throws {
+        let lab = try Lab()
+        defer { lab.cleanup() }
+        let home = lab.root + "/home"
+        try FileManager.default.createDirectory(atPath: home, withIntermediateDirectories: true)
+        try lab.write(home + "/.zshrc", "PS1='% '\necho bem-vindo\n")
+        let engine = SwiftTermEngine(homeDirectory: home)
+        engine.start(directory: home, command: nil)
+        defer { engine.terminate() }
+
+        XCTAssertEqual(engine.mode, .starting)
+        await waitUntil(engine.mode == .ready, "primeiro prompt")
+        XCTAssertTrue(engine.startupOutput.plain.contains("bem-vindo"))
+
+        let longLine = String(repeating: "x", count: 130)
+        engine.submit("printf 'ola\\n\\033[31mvermelho\\033[0m\\n'; echo \(longLine)")
+        await waitUntil(engine.blocks.count == 1 && engine.blocks[0].exitCode != nil, "primeiro bloco")
+        XCTAssertEqual(engine.mode, .ready)
+        let first = try XCTUnwrap(engine.output(for: engine.blocks[0].id))
+        XCTAssertEqual(first.plain, "ola\nvermelho\n" + longLine)
+        XCTAssertFalse(first.plain.contains("%"), "o prompt não pode vazar para a saída")
+
+        engine.submit("sleep 0.6; echo depois")
+        await waitUntil(engine.mode == .running, "modo executando")
+        XCTAssertEqual(engine.blocks.count, 2)
+        XCTAssertTrue(engine.blocks[1].isRunning)
+        await waitUntil(engine.mode == .ready && engine.blocks[1].exitCode != nil, "segundo bloco")
+        XCTAssertEqual(engine.output(for: engine.blocks[1].id)?.plain, "depois")
+
+        engine.submit("false")
+        await waitUntil(engine.blocks.count == 3 && engine.blocks[2].exitCode != nil, "terceiro bloco")
+        XCTAssertEqual(engine.blocks[2].exitCode, 1)
+        XCTAssertEqual(engine.output(for: engine.blocks[2].id)?.isEmpty, true)
+        XCTAssertEqual(engine.blocks.map(\.command), [
+            "printf 'ola\\n\\033[31mvermelho\\033[0m\\n'; echo \(longLine)",
+            "sleep 0.6; echo depois",
+            "false",
+        ])
+    }
+
+    func testMultilineCommandIsSubmittedAsOneBlock() async throws {
+        let lab = try Lab()
+        defer { lab.cleanup() }
+        let home = lab.root + "/home"
+        try FileManager.default.createDirectory(atPath: home, withIntermediateDirectories: true)
+        try lab.write(home + "/.zshrc", "PS1='% '\n")
+        let engine = SwiftTermEngine(homeDirectory: home)
+        engine.start(directory: home, command: nil)
+        defer { engine.terminate() }
+        await waitUntil(engine.mode == .ready, "primeiro prompt")
+        engine.submit("for i in 1 2 3\ndo\necho item$i\ndone")
+        await waitUntil(engine.blocks.count == 1 && engine.blocks[0].exitCode != nil, "bloco multilinha")
+        XCTAssertEqual(engine.output(for: engine.blocks[0].id)?.plain, "item1\nitem2\nitem3")
+    }
+
+    func testExitingTheShellClosesTheRunningBlockAndReportsExit() async throws {
+        let lab = try Lab()
+        defer { lab.cleanup() }
+        let home = lab.root + "/home"
+        try FileManager.default.createDirectory(atPath: home, withIntermediateDirectories: true)
+        try lab.write(home + "/.zshrc", "PS1='% '\n")
+        let engine = SwiftTermEngine(homeDirectory: home)
+        nonisolated(unsafe) var exitCode: Int32??
+        engine.onExit = { exitCode = .some($0) }
+        engine.start(directory: home, command: nil)
+        await waitUntil(engine.mode == .ready, "primeiro prompt")
+        engine.submit("exit 4")
+        await waitUntil(exitCode != nil, "saída do shell")
+        XCTAssertEqual(exitCode, .some(4))
+        XCTAssertEqual(engine.blocks.last?.isRunning, false)
+        XCTAssertEqual(engine.mode, .ready)
+    }
+
+    func testWithoutShellIntegrationTheSessionStaysClassic() async throws {
+        let lab = try Lab()
+        defer { lab.cleanup() }
+        let home = lab.root + "/home"
+        try FileManager.default.createDirectory(atPath: home, withIntermediateDirectories: true)
+        try lab.write(home + "/.zshrc", "PS1='% '\n")
+        let engine = SwiftTermEngine(homeDirectory: home, shellIntegration: false)
+        engine.start(directory: home, command: nil)
+        defer { engine.terminate() }
+        engine.submit("echo classico")
+        try await Task.sleep(nanoseconds: 1_500_000_000)
+        XCTAssertEqual(engine.mode, .starting)
+        XCTAssertTrue(engine.blocks.isEmpty)
     }
 }

@@ -7,6 +7,7 @@ App de macOS (SwiftUI, Swift 5, macOS 14+) que gerencia "tramas": a mesma branch
 - `trama/Engine/` — toda a lógica (git, tramas, cápsula, achados, hooks, CLI). **Só Foundation**: nada de AppKit/SwiftUI aqui, para continuar testável.
 - `trama/State/` — `AppModel` (ObservableObject, @MainActor) chama o motor fora da thread principal via `Core.run { workspace in ... }`.
 - `trama/Screens/` e `trama/Theme/` — interface. Cores e componentes ficam em `Theme.swift`; não use cores soltas nas telas.
+- `vscode-extension/` — extensão do VS Code (TypeScript, sem dependências de runtime). Só chama o comando `trama … --json`; não duplica lógica do motor. `npm run compile` dentro da pasta para checar.
 - `tramaTests/` — XCTest do motor, com repositórios git temporários reais.
 
 As pastas são sincronizadas com o projeto (Xcode 16+): **arquivo novo dentro delas entra no build sozinho**. Não edite `trama.xcodeproj/project.pbxproj` para adicionar arquivos. Nomes de arquivo `.swift` precisam ser únicos no alvo inteiro.

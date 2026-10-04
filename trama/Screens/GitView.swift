@@ -17,7 +17,6 @@ enum DetailMode: String, CaseIterable, Identifiable {
 
 struct DetailBar: View {
     @Binding var mode: DetailMode
-    @Binding var capsuleVisible: Bool
     let refreshing: Bool
     let onRefresh: () -> Void
     @Namespace private var pill
@@ -68,17 +67,6 @@ struct DetailBar: View {
                 .padding(3)
                 .background(RoundedRectangle(cornerRadius: 9).fill(Theme.surface))
                 .overlay(RoundedRectangle(cornerRadius: 9).stroke(Theme.line2, lineWidth: 1))
-                Button {
-                    withAnimation(.easeInOut(duration: 0.22)) { capsuleVisible.toggle() }
-                } label: {
-                    HStack(spacing: 7) {
-                        Image(systemName: "sidebar.right")
-                        Text("Cápsula")
-                    }
-                    .foregroundStyle(capsuleVisible ? Theme.emberText : Theme.text2)
-                }
-                .buttonStyle(GhostButton())
-                .help(capsuleVisible ? "Ocultar a cápsula" : "Mostrar a cápsula")
             }
         }
     }
@@ -132,39 +120,35 @@ struct GitView: View {
             let wide = geo.size.width >= 760
             Group {
                 if wide {
-                    HStack(alignment: .top, spacing: repoListVisible ? 26 : 14) {
-                        if repoListVisible {
+                    ZStack(alignment: .topLeading) {
+                        HStack(alignment: .top, spacing: 0) {
                             VStack(alignment: .leading, spacing: 8) {
                                 HStack(spacing: 8) {
-                                    Button {
-                                        withAnimation(.easeInOut(duration: 0.22)) { repoListVisible = false }
-                                    } label: {
-                                        Image(systemName: "sidebar.left")
-                                    }
-                                    .buttonStyle(IconButton(size: 28))
-                                    .help("Recolher a lista de repositórios")
-                                    .accessibilityLabel("Recolher a lista de repositórios")
+                                    Color.clear.frame(width: 28, height: 28)
                                     Spacer(minLength: 0)
                                     commitAllButton
                                 }
                                 RepoList(trama: trama, outside: outside, selected: currentRepo, horizontal: false) { select($0) }
                             }
-                            .frame(width: 272)
-                            .transition(.move(edge: .leading).combined(with: .opacity))
-                        } else {
-                            Button {
-                                withAnimation(.easeInOut(duration: 0.22)) { repoListVisible = true }
-                            } label: {
-                                Image(systemName: "sidebar.left")
-                                    .foregroundStyle(Theme.emberText)
-                            }
-                            .buttonStyle(IconButton(size: 28))
-                            .help("Mostrar a lista de repositórios")
-                            .accessibilityLabel("Mostrar a lista de repositórios")
+                            .frame(width: 272, alignment: .topLeading)
+                            .frame(width: repoListVisible ? 272 : 0, alignment: .topLeading)
+                            .opacity(repoListVisible ? 1 : 0)
+                            .allowsHitTesting(repoListVisible)
+                            .clipped()
+                            .padding(.trailing, repoListVisible ? 26 : 0)
+                            detail
                         }
-                        detail
-                            .padding(.top, repoListVisible ? 36 : 0)
+                        Button {
+                            repoListVisible.toggle()
+                        } label: {
+                            Image(systemName: "sidebar.left")
+                                .foregroundStyle(repoListVisible ? Theme.text2 : Theme.emberText)
+                        }
+                        .buttonStyle(IconButton(size: 28))
+                        .help(repoListVisible ? "Recolher a lista de repositórios" : "Mostrar a lista de repositórios")
+                        .accessibilityLabel(repoListVisible ? "Recolher a lista de repositórios" : "Mostrar a lista de repositórios")
                     }
+                    .animation(.spring(response: 0.36, dampingFraction: 0.86), value: repoListVisible)
                 } else {
                     VStack(alignment: .leading, spacing: 18) {
                         RepoList(trama: trama, outside: outside, selected: currentRepo, horizontal: true) { select($0) }
@@ -304,7 +288,7 @@ struct RepoList: View {
             .scrollIndicators(.never)
         } else {
             VStack(alignment: .leading, spacing: 0) {
-                BlurScrollView {
+                BlurScrollView(height: 4) {
                     VStack(alignment: .leading, spacing: 10) {
                         CollapsibleSection(
                             title: "Nesta trama · \(trama.status.count)",

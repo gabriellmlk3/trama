@@ -32,11 +32,21 @@ struct GitHubProvider: PullRequestProvider {
     }
 
     func retarget(_ dir: String, url: String, base: String) throws {
-        try tool.run(dir, ["pr", "edit", url, "--base", base])
+        try patch(dir, url: url, field: "base", value: base)
     }
 
     func updateBody(_ dir: String, url: String, body: String) throws {
-        try tool.run(dir, ["pr", "edit", url, "--body", body])
+        try patch(dir, url: url, field: "body", value: body)
+    }
+
+    private func patch(_ dir: String, url: String, field: String, value: String) throws {
+        guard let parts = URLComponents(string: url),
+              let host = parts.host else { throw TramaError("endereço de PR inválido: \(url)") }
+        let path = parts.path.split(separator: "/").map(String.init)
+        guard path.count >= 4, path[2] == "pull", Int(path[3]) != nil else {
+            throw TramaError("endereço de PR inválido: \(url)")
+        }
+        try tool.run(dir, ["api", "--hostname", host, "-X", "PATCH", "repos/\(path[0])/\(path[1])/pulls/\(path[3])", "-f", "\(field)=\(value)"])
     }
 
     func status(_ dir: String, url: String) -> PullRequestStatus? {
