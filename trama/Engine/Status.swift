@@ -148,6 +148,7 @@ extension Workspace {
             let r = repos[i]
             do {
                 try Git.fetchBase(r.path, r.base ?? config.defaultBranch)
+                Git.fetchUpstream(r.path)
             } catch {
                 lock.lock()
                 warnings.append(Warning(repo: r.name, message: errorMessage(error)))

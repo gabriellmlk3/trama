@@ -31,6 +31,7 @@ final class AppModel: ObservableObject {
 
     private var loop: Task<Void, Never>?
     private var refreshing = false
+    private var lastFetch = Date.distantPast
     private var knownAgents: [Agent]?
 
     var waitingCount: Int { activeAgents.filter { $0.isWaiting }.count }
@@ -45,6 +46,9 @@ final class AppModel: ObservableObject {
             }
         }
         Notifier.shared.start()
+        NotificationCenter.default.addObserver(forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
+            Task { @MainActor in await self?.fetchIfStale() }
+        }
         loop = Task { [weak self] in
             DispatchQueue.global(qos: .utility).async { Integration.sync() }
             await self?.refresh()
@@ -57,7 +61,7 @@ final class AppModel: ObservableObject {
                 guard let self else { return }
                 cycle += 1
                 await self.refresh()
-                if cycle % 120 == 0 { await self.fetchRemotes() }
+                if cycle % 36 == 0 { await self.fetchRemotes() }
                 if cycle % 12 == 0 {
                     await self.refreshFindings()
                     await self.refreshPullRequests()
@@ -123,12 +127,21 @@ final class AppModel: ObservableObject {
     }
 
     @discardableResult
-    func openPullRequests(_ slug: String, draft: Bool, targets: [String: String] = [:], only: Set<String>? = nil) async -> Bool {
+    func suggestPullRequestText(_ slug: String, targets: [String: String], only: Set<String>?) async -> PullRequestText? {
+        do {
+            return try await Core.run { try $0.suggestPullRequestText(slug, only: only, targets: targets) }
+        } catch {
+            showError(errorMessage(error))
+            return nil
+        }
+    }
+
+    func openPullRequests(_ slug: String, draft: Bool, targets: [String: String] = [:], only: Set<String>? = nil, title: String? = nil, summary: String = "") async -> Bool {
         busy = true
         defer { busy = false }
         let hadPullRequests = !(state?.tramas.first(where: { $0.slug == slug })?.trama.prs.isEmpty ?? true)
         do {
-            let result = try await Core.run { try $0.openPullRequests(slug, draft: draft, targets: targets, only: only) }
+            let result = try await Core.run { try $0.openPullRequests(slug, draft: draft, targets: targets, only: only, title: title, summary: summary) }
             for link in result.manual {
                 if let text = link.url, let url = URL(string: text) { NSWorkspace.shared.open(url) }
             }
@@ -192,8 +205,14 @@ final class AppModel: ObservableObject {
 
     func fetchRemotes() async {
         guard !needsSetup else { return }
+        lastFetch = Date()
         _ = try? await Core.run { $0.fetchAll() }
         await refresh()
+    }
+
+    func fetchIfStale() async {
+        guard Date().timeIntervalSince(lastFetch) > 60 else { return }
+        await fetchRemotes()
     }
 
     func loadCapsule(_ slug: String) async {
@@ -619,6 +638,28 @@ final class AppModel: ObservableObject {
         } catch {
             await refresh()
             showError("\(repo): \(errorMessage(error))")
+        }
+    }
+
+    func updateLocalBase(_ repo: String, branch: String) async -> Bool {
+        await perform(success: "\(repo): \(branch) local atualizada") { _ = try $0.updateLocalBase(repo: repo, branch: branch) }
+    }
+
+    func syncPrimaries(_ slug: String) async {
+        busy = true
+        defer { busy = false }
+        do {
+            let outcomes = try await Core.run { try $0.syncPrimaries(slug) }
+            await refresh()
+            let failed = outcomes.filter(\.failed)
+            let updated = outcomes.count - failed.count
+            if let first = failed.first {
+                showError("\(updated) de \(outcomes.count) cópias principais atualizadas · \(first.repo): \(first.message)")
+            } else {
+                showNotice("\(updated) \(plural(updated, "cópia principal atualizada", "cópias principais atualizadas")) com o remoto")
+            }
+        } catch {
+            showError(errorMessage(error))
         }
     }
 

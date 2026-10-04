@@ -25,8 +25,56 @@ extension Workspace {
     }
 }
 
+public struct SyncOutcome: Sendable {
+    public var repo: String
+    public var message: String
+    public var failed: Bool
+}
+
+extension Workspace {
+    public func syncPrimaries(_ slug: String) throws -> [SyncOutcome] {
+        let t = try trama(slug)
+        return try t.repos.map { key in
+            let r = try repo(key)
+            do {
+                return SyncOutcome(repo: r.name, message: try syncWorktree(repo: r.name, worktree: r.path, pull: true), failed: false)
+            } catch {
+                return SyncOutcome(repo: r.name, message: errorMessage(error), failed: true)
+            }
+        }
+    }
+}
+
 extension Git {
+    static func fetchUpstream(_ dir: String) {
+        let upstream = execute(dir, ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"])
+        let name = upstream.output.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard upstream.code == 0, name.hasPrefix("origin/") else { return }
+        _ = execute(dir, ["fetch", "--quiet", "origin", String(name.dropFirst("origin/".count))], timeout: 45)
+    }
+
     static func behindUpstream(_ dir: String) -> Int {
         (try? countCommits(dir, "HEAD..@{u}")) ?? 0
+    }
+}
+
+extension Git {
+    static func localBranchBehindOrigin(_ dir: String, _ branch: String) -> Int {
+        guard refExists(dir, "refs/heads/" + branch), refExists(dir, "refs/remotes/origin/" + branch) else { return 0 }
+        return (try? countCommits(dir, "\(branch)..origin/\(branch)")) ?? 0
+    }
+}
+
+extension Workspace {
+    public func updateLocalBase(repo key: String, branch: String) throws -> String {
+        let r = try repo(key)
+        guard Git.hasOrigin(r.path) else { throw TramaError("\(r.name) não tem remoto origin") }
+        let behind = Git.localBranchBehindOrigin(r.path, branch)
+        guard behind > 0 else { return "\(branch) já está em dia com o remoto" }
+        let updated = Git.execute(r.path, ["fetch", "--quiet", "origin", "\(branch):\(branch)"], timeout: 60)
+        guard updated.code == 0 else {
+            throw TramaError("não deu para atualizar \(branch) sem merge: \(updated.error.trimmingCharacters(in: .whitespacesAndNewlines))")
+        }
+        return "\(branch) local atualizada · \(behind) \(behind == 1 ? "commit" : "commits")"
     }
 }

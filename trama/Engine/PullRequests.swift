@@ -64,10 +64,11 @@ extension Workspace {
         return r
     }
 
-    func pullRequestBody(_ t: Trama, capsule: TramaCapsule, links: [(repo: String, url: String)], current: String, limit: Int = Int.max) -> String {
+    func pullRequestBody(_ t: Trama, capsule: TramaCapsule, links: [(repo: String, url: String)], current: String, limit: Int = Int.max, title: String? = nil, summary: String = "") -> String {
         var head = ""
         let goal = capsule.goal.trimmingCharacters(in: .whitespacesAndNewlines)
-        head += "## \(t.title)\n\n"
+        head += "## \(title ?? t.title)\n\n"
+        if !summary.isEmpty { head += "\(summary)\n\n" }
         if !goal.isEmpty { head += "**Objetivo.** \(goal)\n\n" }
         if let task = t.task, !task.isEmpty { head += "**Tarefa.** \(task)\n\n" }
         if !capsule.decisions.isEmpty {
@@ -88,7 +89,7 @@ extension Workspace {
     }
 
     @discardableResult
-    public func openPullRequests(_ slug: String, draft: Bool = false, targets: [String: String] = [:], only: Set<String>? = nil) throws -> (trama: Trama, prs: [PullRequestInfo], warnings: [Warning], manual: [ManualPullRequest], opened: [String]) {
+    public func openPullRequests(_ slug: String, draft: Bool = false, targets: [String: String] = [:], only: Set<String>? = nil, title: String? = nil, summary: String = "") throws -> (trama: Trama, prs: [PullRequestInfo], warnings: [Warning], manual: [ManualPullRequest], opened: [String]) {
         let t = try trama(slug)
         guard !t.isArchived else { throw TramaError("essa trama está arquivada") }
         let capsule = (try? readCapsule(t.slug)) ?? TramaCapsule(trama: t.slug, path: "", exists: false)
@@ -152,8 +153,8 @@ extension Workspace {
                 if let existingURL = knownURL ?? current?.url {
                     url = existingURL
                 } else {
-                    let body = pullRequestBody(t, capsule: capsule, links: [], current: r.name, limit: provider.bodyLimit)
-                    url = try provider.create(wt, head: t.branch, base: target, title: t.title, body: body, draft: draft)
+                    let body = pullRequestBody(t, capsule: capsule, links: [], current: r.name, limit: provider.bodyLimit, title: title, summary: summary)
+                    url = try provider.create(wt, head: t.branch, base: target, title: title ?? t.title, body: body, draft: draft)
                 }
                 known[r.name] = url
                 linked.append((r.name, url))
@@ -168,7 +169,7 @@ extension Workspace {
         }
         let links = linked
         for o in opened {
-            let body = pullRequestBody(t, capsule: capsule, links: links, current: o.repo.name, limit: o.provider.bodyLimit)
+            let body = pullRequestBody(t, capsule: capsule, links: links, current: o.repo.name, limit: o.provider.bodyLimit, title: title, summary: summary)
             do {
                 try o.provider.updateBody(o.dir, url: o.url, body: body)
             } catch {

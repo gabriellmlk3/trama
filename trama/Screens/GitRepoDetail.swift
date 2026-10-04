@@ -310,6 +310,25 @@ struct WorktreesCard: View {
                         .font(.system(size: 12))
                         .foregroundStyle(Theme.faded)
                 }
+                if overview.localBaseBehind > 0, !overview.worktrees.contains(where: { $0.branch == overview.base }) {
+                    HStack(spacing: 8) {
+                        Image(systemName: "exclamationmark.circle")
+                            .font(.system(size: 11.5))
+                        Text("\(overview.base) local está \(overview.localBaseBehind) \(plural(overview.localBaseBehind, "commit", "commits")) atrás do remoto")
+                            .font(.system(size: 11.5))
+                            .lineLimit(2)
+                        Spacer(minLength: 6)
+                        Button("Atualizar") {
+                            Task { _ = await model.updateLocalBase(repo.name, branch: overview.base) }
+                        }
+                        .buttonStyle(GhostButton(compact: true))
+                        .disabled(model.busy)
+                    }
+                    .foregroundStyle(Theme.waitText)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 7)
+                    .background(RoundedRectangle(cornerRadius: 8).fill(Theme.wait.opacity(0.1)))
+                }
                 VStack(spacing: 4) {
                     ForEach(Array(overview.worktrees.enumerated()), id: \.element.id) { i, w in
                         HStack(spacing: 8) {

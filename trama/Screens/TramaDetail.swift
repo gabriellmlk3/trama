@@ -346,8 +346,26 @@ struct LoomHeader: View {
                 .contentShape(Capsule())
             }
             .buttonStyle(.plain)
-            .padding(.trailing, 14)
             .help(onlyInside ? "Mostrar todos os repositórios" : "Mostrar só os repositórios desta trama")
+            Button {
+                Task { await model.syncPrimaries(selected.slug) }
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "arrow.triangle.2.circlepath")
+                    Text("Atualizar cópias")
+                }
+                .font(.system(size: 11.5))
+                .foregroundStyle(Theme.faded)
+                .padding(.horizontal, 10)
+                .frame(height: 26)
+                .overlay(Capsule().stroke(Theme.line2, lineWidth: 1))
+                .contentShape(Capsule())
+            }
+            .buttonStyle(.plain)
+            .disabled(model.busy)
+            .padding(.leading, 6)
+            .padding(.trailing, 14)
+            .help("Busca o remoto e atualiza (fast-forward) a cópia principal de cada repositório desta trama")
         }
         .frame(height: 44)
         .background { LoomTail(columns: columns, selected: selected, fadesIn: true) }

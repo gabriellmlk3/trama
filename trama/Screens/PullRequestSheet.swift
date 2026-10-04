@@ -298,6 +298,9 @@ struct PullRequestSheet: View {
     @State private var pickingForAll = false
     @State private var sending = false
     @State private var confirmingMerge = false
+    @State private var titleText = ""
+    @State private var summaryText = ""
+    @State private var generatingText = false
     let trama: LiveTrama
 
     init(trama: LiveTrama, mode: PullRequestPlanner.Mode) {
@@ -311,6 +314,7 @@ struct PullRequestSheet: View {
         VStack(alignment: .leading, spacing: 0) {
             header
             Rectangle().fill(Theme.line).frame(height: 1)
+            if planner.mode == .pullRequest, planner.loaded { textBlock }
             content
             footer
         }
@@ -352,6 +356,60 @@ struct PullRequestSheet: View {
         .padding(.horizontal, 28)
         .padding(.top, 26)
         .padding(.bottom, 18)
+    }
+
+    var textBlock: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                SectionLabel(text: "Título e descrição")
+                Spacer()
+                Button {
+                    generateText()
+                } label: {
+                    if generatingText {
+                        ProgressView().controlSize(.mini)
+                    } else {
+                        Label("Gerar com o Claude", systemImage: "sparkles")
+                            .font(.system(size: 11.5))
+                    }
+                }
+                .buttonStyle(GhostButton(compact: true))
+                .disabled(generatingText || planner.selection.isEmpty)
+                .help("Resume os commits à frente do destino em um título e uma descrição")
+            }
+            TextField(trama.title, text: $titleText)
+                .textFieldStyle(.plain)
+                .font(.system(size: 12.5))
+                .padding(9)
+                .background(RoundedRectangle(cornerRadius: 8).fill(Theme.surface))
+                .overlay(RoundedRectangle(cornerRadius: 8).stroke(Theme.line, lineWidth: 1))
+            if !summaryText.isEmpty || !titleText.isEmpty {
+                TextField("Descrição (opcional)", text: $summaryText, axis: .vertical)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 12.5))
+                    .lineLimit(2...8)
+                    .padding(9)
+                    .background(RoundedRectangle(cornerRadius: 8).fill(Theme.surface))
+                    .overlay(RoundedRectangle(cornerRadius: 8).stroke(Theme.line, lineWidth: 1))
+            }
+        }
+        .padding(.horizontal, 28)
+        .padding(.vertical, 14)
+        .overlay(alignment: .bottom) { Rectangle().fill(Theme.line).frame(height: 1) }
+    }
+
+    func generateText() {
+        guard !generatingText else { return }
+        generatingText = true
+        let targets = planner.runTargets
+        let only = planner.runOnly
+        Task {
+            if let text = await model.suggestPullRequestText(trama.slug, targets: targets, only: only) {
+                titleText = text.title
+                summaryText = text.summary
+            }
+            generatingText = false
+        }
     }
 
     var content: some View {
@@ -583,6 +641,8 @@ struct PullRequestSheet: View {
         let only = planner.runOnly
         let draft = planner.draft
         let merging = planner.mode == .merge
+        let title = titleText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let summary = summaryText.trimmingCharacters(in: .whitespacesAndNewlines)
         Task {
             if merging {
                 let ok = await model.mergeIntoBranches(trama.slug, targets: targets, only: only)
@@ -590,7 +650,7 @@ struct PullRequestSheet: View {
                 if ok { dismiss() }
                 return
             }
-            let ok = await model.openPullRequests(trama.slug, draft: draft, targets: targets, only: only)
+            let ok = await model.openPullRequests(trama.slug, draft: draft, targets: targets, only: only, title: title.isEmpty ? nil : title, summary: summary)
             sending = false
             if ok { dismiss() }
         }

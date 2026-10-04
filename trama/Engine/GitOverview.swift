@@ -46,6 +46,7 @@ public struct GitOverview: Sendable {
     public var worktrees: [WorktreeSummary]
     public var merging = false
     public var conflicts = 0
+    public var localBaseBehind = 0
     public var loadedAt: Int64
 
     public var added: Int { changes.reduce(0) { $0 + $1.added } }
@@ -204,6 +205,7 @@ extension Workspace {
             worktrees: worktreeSummaries(r, base: base),
             merging: Git.isMerging(wt),
             conflicts: Git.conflictFiles(wt).count,
+            localBaseBehind: compare == nil ? Git.localBranchBehindOrigin(wt, base) : 0,
             loadedAt: nowUnix()
         )
     }

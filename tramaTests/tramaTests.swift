@@ -731,14 +731,14 @@ final class FlowTests: XCTestCase {
 
         _ = try w.openPullRequests(t.slug, only: ["rebocs-admin", "rebocs_api"])
         calls = try File.read(log) ?? ""
-        XCTAssertTrue(calls.contains("pr edit https://github.com/x/rebocs-admin/pull/7 --base develop"))
-        XCTAssertFalse(calls.contains("pr edit https://github.com/x/rebocs_api/pull/7 --base"), "quem já aponta para o destino não é redirecionado")
+        XCTAssertTrue(calls.contains("api --hostname github.com -X PATCH repos/x/rebocs-admin/pulls/7 -f base=develop"))
+        XCTAssertFalse(calls.contains("repos/x/rebocs_api/pulls/7 -f base="), "quem já aponta para o destino não é redirecionado")
         XCTAssertTrue(try w.readCapsule(t.slug).journal.contains { $0.text.contains("(antes main)") })
 
         try pullRequestState("rebocs-admin", state: "OPEN", base: "develop")
         _ = try w.openPullRequests(t.slug, targets: ["rebocs-admin": "main"], only: ["rebocs-admin"])
         calls = try File.read(log) ?? ""
-        XCTAssertTrue(calls.contains("pr edit https://github.com/x/rebocs-admin/pull/7 --base main"))
+        XCTAssertTrue(calls.contains("api --hostname github.com -X PATCH repos/x/rebocs-admin/pulls/7 -f base=main"))
         XCTAssertEqual(try w.trama(t.slug).prBases, ["rebocs_api": "develop"], "voltar para a base padrão apaga a escolha")
 
         try pullRequestState("rebocs_api", state: "MERGED", base: "develop")
@@ -1680,6 +1680,83 @@ final class GitOverviewTests: XCTestCase {
         XCTAssertTrue(pulled.contains("atualizada"))
         XCTAssertEqual(Git.behindUpstream(primary), 0)
         XCTAssertTrue(FileManager.default.fileExists(atPath: primary + "/novo.txt"))
+    }
+
+    func testLocalBaseBehindRemoteIsDetectedAndUpdated() throws {
+        let lab = try Lab()
+        defer { lab.cleanup() }
+        let w = try lab.workspace()
+        let (t, _) = try w.newTrama(NewTramaOptions(title: "Base velha", repos: ["api"], noFetch: true))
+        let primary = try w.repo("api").path
+        XCTAssertEqual(try w.gitOverview(t.slug, repo: "api").localBaseBehind, 0)
+
+        try lab.pushToMain("rebocs_api", "novo.txt", "x\n", "chegou do remoto")
+        try lab.git(primary, "checkout", "-q", "--detach")
+        try lab.git(primary, "fetch", "-q")
+        XCTAssertEqual(try w.gitOverview(t.slug, repo: "api").localBaseBehind, 1)
+
+        XCTAssertTrue(try w.updateLocalBase(repo: "api", branch: "main").contains("atualizada"))
+        XCTAssertEqual(try w.gitOverview(t.slug, repo: "api").localBaseBehind, 0)
+    }
+
+    func testFetchAllAlsoUpdatesTheUpstreamOfThePrimaryBranch() throws {
+        let lab = try Lab()
+        defer { lab.cleanup() }
+        let w = try lab.workspace()
+        let primary = try w.repo("api").path
+        try lab.pushToMain("rebocs_api", "base.txt", "b\n", "base")
+        try lab.git(primary, "checkout", "-q", "-b", "feat")
+        try lab.git(primary, "push", "-q", "-u", "origin", "feat")
+        let peer = lab.root + "/colega/rebocs_api"
+        try lab.git(peer, "fetch", "-q")
+        try lab.git(peer, "checkout", "-q", "-B", "feat", "origin/feat")
+        try lab.commit(peer, "f.txt", "1\n", "feat nova")
+        try lab.git(peer, "push", "-q", "origin", "feat")
+
+        XCTAssertEqual(Git.behindUpstream(primary), 0)
+        w.fetchAll()
+        XCTAssertEqual(Git.behindUpstream(primary), 1)
+    }
+
+    func testSyncPrimariesReportsEachRepoSeparately() throws {
+        let lab = try Lab()
+        defer { lab.cleanup() }
+        let w = try lab.workspace()
+        let (t, _) = try w.newTrama(NewTramaOptions(title: "Todas", repos: ["api", "admin"], noFetch: true))
+        let api = try w.repo("api").path
+        try lab.pushToMain("rebocs_api", "novo.txt", "x\n", "chegou do remoto")
+        try lab.git(try w.repo("admin").path, "checkout", "-q", "--detach")
+
+        let outcomes = try w.syncPrimaries(t.slug)
+        XCTAssertEqual(outcomes.map(\.repo), ["rebocs_api", "rebocs-admin"])
+        XCTAssertEqual(outcomes.map(\.failed), [false, true])
+        XCTAssertTrue(outcomes[1].message.contains("HEAD solto"))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: api + "/novo.txt"))
+    }
+
+    func testPullRequestTextIsBuiltFromTheCommitsAheadOfTheTarget() throws {
+        let lab = try Lab()
+        defer { lab.cleanup() }
+        let w = try lab.workspace()
+        let (t, _) = try w.newTrama(NewTramaOptions(title: "Texto do PR", repos: ["api", "admin"], noFetch: true))
+        try lab.commit(w.worktreePath(t.slug, "rebocs_api"), "src/novo.txt", "x\n", "adiciona o endpoint novo")
+        let fake = lab.root + "/claude"
+        try lab.write(fake, "#!/bin/sh\nprintf '%s' \"$2\"\n")
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: fake)
+        setenv("TRAMA_CLAUDE", fake, 1)
+        defer { unsetenv("TRAMA_CLAUDE") }
+
+        let text = try w.suggestPullRequestText(t.slug)
+        XCTAssertTrue(text.summary.contains("adiciona o endpoint novo"))
+        XCTAssertTrue(text.summary.contains("rebocs_api"))
+        XCTAssertFalse(text.summary.contains("rebocs-admin"), "repositório sem commits à frente fica de fora")
+    }
+
+    func testParsePullRequestTextSplitsTitleAndSummary() {
+        let text = Workspace.parsePullRequestText("```\n# Novo endpoint\n\nPorque sim.\n- item\n```")
+        XCTAssertEqual(text?.title, "Novo endpoint")
+        XCTAssertEqual(text?.summary, "Porque sim.\n- item")
+        XCTAssertNil(Workspace.parsePullRequestText("  \n"))
     }
 
     func testDiscardFilesAndLines() throws {
