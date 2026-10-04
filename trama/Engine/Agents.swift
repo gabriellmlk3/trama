@@ -169,6 +169,11 @@ extension Workspace {
             b += "Outros repositórios desta trama: \(others.joined(separator: "; ")).\n"
         }
         b += "Registre decisões com `trama decisao \"...\"` e passe trabalho a outro repositório com `trama handoff <repo> \"...\"`.\n"
+        if config.agentPullPolicy == .approval {
+            b += "Precisa de um repositório que não está na trama? Peça com `trama sugerir <repo|pasta> \"motivo\"`: o usuário aprova no app antes de entrar. `trama repo descobrir` lista repositórios ainda não cadastrados.\n"
+        } else {
+            b += "Precisa de um repositório que não está na trama? Inclua com `trama puxar <trama> <repo> --motivo \"...\"`; se ele não estiver cadastrado, `trama repo descobrir` mostra candidatos e `trama repo add <pasta>` cadastra. Para o usuário decidir, use `trama sugerir`.\n"
+        }
         if let c = try? readCapsule(t.slug), c.exists {
             if let r {
                 let pending = c.handoffs.filter { !$0.done && $0.to == r.name }

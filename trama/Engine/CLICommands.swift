@@ -6,7 +6,7 @@ extension CLI {
                         usage: "trama init [--raiz ~/Tramas] [--contexto <pasta do repo de contexto>]",
                         valueFlags: ["contexto"], run: cmdInit),
         "repo": Command(summary: "cadastra repositórios (add, ls, rm, preparo, servico, ordem, provedor)",
-                        usage: "trama repo add <pasta>... [--apelido api] [--rotulo backend] [--base main]\n  trama repo ls\n  trama repo rm <nome>\n  trama repo preparo <nome> [--copiar \".env*,local.properties\"] [--rodar \"npm ci\"] [--limpar]\n  trama repo servico <nome> [--nome api --comando \"npm run dev\" --porta 3000] [--remover api]\n  trama repo ordem <nome> <n>   (ordem de merge dos PRs: menor primeiro)\n  trama repo provedor <nome> [github|azure|gitlab|bitbucket|manual|auto]   (onde os PRs são abertos; auto = detecta pelo remoto)",
+                        usage: "trama repo add <pasta>... [--apelido api] [--rotulo backend] [--base main]\n  trama repo ls\n  trama repo rm <nome>\n  trama repo preparo <nome> [--copiar \".env*,local.properties\"] [--rodar \"npm ci\"] [--limpar]\n  trama repo servico <nome> [--nome api --comando \"npm run dev\" --porta 3000] [--remover api]\n  trama repo ordem <nome> <n>   (ordem de merge dos PRs: menor primeiro)\n  trama repo provedor <nome> [github|azure|gitlab|bitbucket|manual|auto]   (onde os PRs são abertos; auto = detecta pelo remoto)\n  trama repo descobrir [--json]   (repositórios git ao lado dos cadastrados, ainda fora do cadastro)\n  trama repo puxada [livre|aprovacao]   (agentes puxam repositórios sozinhos ou só sugerem e esperam o seu aceite)",
                         valueFlags: ["apelido", "rotulo", "base", "copiar", "rodar", "nome", "comando", "porta", "remover"], run: cmdRepo),
         "nova": Command(summary: "cria uma trama: branch + worktree em cada repositório + cápsula",
                         usage: "trama nova \"Título\" --repos api,admin [--base main] [--tarefa CU-482] [--objetivo \"...\"] [--contexto <pasta>] [--slug x] [--sem-fetch]",
@@ -14,7 +14,12 @@ extension CLI {
         "ls": Command(summary: "lista as tramas", usage: "trama ls [--todas]", valueFlags: [], run: cmdList),
         "status": Command(summary: "situação dos repositórios de uma trama (ou de todas)", usage: "trama status [trama]", valueFlags: [], run: cmdStatus),
         "estado": Command(summary: "tudo em JSON", usage: "trama estado [--todas]", valueFlags: [], run: cmdState),
-        "puxar": Command(summary: "inclui repositórios numa trama", usage: "trama puxar <trama> <repo>... [--sem-fetch]", valueFlags: [], run: cmdPull),
+        "puxar": Command(summary: "inclui repositórios numa trama (agentes viram sugestão quando a puxada exige aprovação)", usage: "trama puxar <trama> <repo>... [--motivo \"por que\"] [--sem-fetch]", valueFlags: ["motivo"], run: cmdPull),
+        "sugerir": Command(summary: "sugere incluir outro repositório (cadastrado ou uma pasta) na trama, com o motivo",
+                           usage: "trama sugerir <repo|pasta> \"motivo\" [--trama x] [--autor nome]", valueFlags: ["trama", "autor"], run: cmdSuggest),
+        "sugestao": Command(summary: "lista, aceita ou dispensa as sugestões de repositório da trama",
+                            usage: "trama sugestao [ls] [--trama x] [--json]\n  trama sugestao aceitar <n> [--trama x] [--sem-fetch]\n  trama sugestao dispensar <n> [--trama x]",
+                            valueFlags: ["trama"], run: cmdSuggestion),
         "soltar": Command(summary: "tira um repositório da trama (a branch continua)", usage: "trama soltar <trama> <repo> [--forcar]", valueFlags: [], run: cmdDrop),
         "estacionar": Command(summary: "pausa uma trama (os worktrees ficam intactos)", usage: "trama estacionar [trama]", valueFlags: [], run: cmdPark),
         "retomar": Command(summary: "reativa uma trama, com rebase opcional na base", usage: "trama retomar <trama> [--rebase] [--sem-fetch]", valueFlags: [], run: cmdResume),
@@ -78,6 +83,9 @@ extension CLI {
         let w = try c.open()
         switch a.positional(0) ?? "ls" {
         case "add", "adicionar":
+            if c.isAgent && w.config.agentPullPolicy == .approval {
+                throw TramaError("cadastrar repositórios exige aprovação · use `trama sugerir <pasta> \"motivo\"` e o usuário aceita no app")
+            }
             let paths = Array(a.positionals.dropFirst())
             guard !paths.isEmpty else { throw TramaError("informe a pasta de pelo menos um repositório") }
             if paths.count > 1 && (a.value("apelido") != nil || a.value("rotulo") != nil) {
@@ -149,6 +157,25 @@ extension CLI {
             for s in r.services {
                 c.line("  \(s.name) · porta \(s.port) (+10 por trama) · \(s.command)")
             }
+        case "descobrir":
+            let found = w.discoverRepos()
+            if c.json { return try c.emitJSON(found) }
+            guard !found.isEmpty else {
+                return c.line("Nenhum repositório novo ao lado dos cadastrados.")
+            }
+            c.text(table([["NOME", "PASTA"]] + found.map { [$0.name, $0.path] }))
+            c.line("\nPara usar um deles numa trama: trama sugerir <pasta> \"motivo\"")
+        case "puxada":
+            guard let v = a.positional(1) else {
+                let current = w.config.agentPullPolicy
+                if c.json { return try c.emitJSON(["politica": current.rawValue]) }
+                return c.line(current == .free ? "livre · agentes puxam repositórios sozinhos" : "aprovacao · agentes só sugerem; você aceita no app ou com `trama sugestao aceitar`")
+            }
+            guard let policy = AgentPullPolicy(rawValue: v.lowercased().replacingOccurrences(of: "ç", with: "c").replacingOccurrences(of: "ã", with: "a")) else {
+                throw TramaError("use livre ou aprovacao")
+            }
+            try w.setAgentPullPolicy(policy)
+            c.ok(policy == .free ? "agentes puxam repositórios sozinhos" : "agentes só sugerem repositórios; a puxada espera o seu aceite")
         case "ls", "lista":
             if c.json { return try c.emitJSON(w.config.repos) }
             guard !w.config.repos.isEmpty else {
@@ -160,7 +187,7 @@ extension CLI {
             }
             c.text(table(rows))
         default:
-            throw TramaError("subcomando desconhecido: \(a.positional(0) ?? "") (use add, ls, rm, preparo, servico, ordem ou provedor)")
+            throw TramaError("subcomando desconhecido: \(a.positional(0) ?? "") (use add, ls, rm, preparo, servico, ordem, provedor, descobrir ou puxada)")
         }
     }
 
@@ -280,9 +307,57 @@ extension CLI {
     static func cmdPull(_ c: Context, _ a: Arguments) throws {
         let w = try c.open()
         guard a.positionals.count >= 2 else { throw TramaError("uso: trama puxar <trama> <repo>...") }
+        if c.isAgent && w.config.agentPullPolicy == .approval {
+            let slug = try w.trama(a.positionals[0]).slug
+            let reason = a.value("motivo") ?? "o agente pediu para incluir"
+            for key in a.positionals.dropFirst().flatMap({ $0.split(separator: ",").map(String.init) }) {
+                let item = try w.suggestRepo(slug, target: key, author: c.author(nil, nil), reason: reason)
+                c.ok("sugestão \(item.index) registrada: \(item.to ?? key) · espera o aceite do usuário (a puxada de agentes exige aprovação)")
+            }
+            return
+        }
         let (t, warnings) = try w.pullRepos(a.positionals[0], Array(a.positionals.dropFirst()), noFetch: a.has("sem-fetch"))
         c.ok("\(t.title) agora tem \(t.repos.joined(separator: ", "))")
         c.warnings(warnings)
+    }
+
+    static func cmdSuggest(_ c: Context, _ a: Arguments) throws {
+        let w = try c.open()
+        guard a.positionals.count >= 2 else { throw TramaError("uso: trama sugerir <repo|pasta> \"motivo\"") }
+        let (t, r) = try c.targetTrama(w, a.value("trama"))
+        let item = try w.suggestRepo(t.slug, target: a.positionals[0], author: c.author(r, a.value("autor")), reason: a.text(from: 1))
+        if c.json { return try c.emitJSON(item) }
+        c.ok("sugestão \(item.index) registrada em \(t.title): incluir \(item.to ?? a.positionals[0])")
+        c.line("  o usuário aceita no app ou com: trama sugestao aceitar \(item.index) --trama \(t.slug)")
+    }
+
+    static func cmdSuggestion(_ c: Context, _ a: Arguments) throws {
+        let w = try c.open()
+        let action = a.positional(0) ?? "ls"
+        let (t, _) = try c.targetTrama(w, a.value("trama"))
+        switch action {
+        case "ls", "lista":
+            let list = try w.readCapsule(t.slug).suggestions
+            if c.json { return try c.emitJSON(list) }
+            guard !list.isEmpty else { return c.line("Nenhuma sugestão de repositório.") }
+            var rows = [["Nº", "REPOSITÓRIO", "SITUAÇÃO", "AUTOR", "MOTIVO"]]
+            for s in list {
+                rows.append(["\(s.index)", s.to ?? "", s.dismissed ? "dispensada" : (s.done ? "aceita" : "aberta"), s.author ?? "", s.text])
+            }
+            c.text(table(rows))
+        case "aceitar", "dispensar":
+            guard let s = a.positional(1), let n = Int(s) else { throw TramaError("uso: trama sugestao \(action) <n>") }
+            if action == "aceitar" {
+                let (updated, warnings) = try w.acceptSuggestion(t.slug, number: n, noFetch: a.has("sem-fetch"))
+                c.ok("\(updated.title) agora tem \(updated.repos.joined(separator: ", "))")
+                c.warnings(warnings)
+            } else {
+                try w.dismissSuggestion(t.slug, number: n)
+                c.ok("sugestão \(n) dispensada")
+            }
+        default:
+            throw TramaError("subcomando desconhecido: \(action) (use ls, aceitar ou dispensar)")
+        }
     }
 
     static func cmdDrop(_ c: Context, _ a: Arguments) throws {
@@ -549,7 +624,7 @@ extension CLI {
         try w.addHandoff(t.slug, from: from, to: to, author: c.author(r, a.value("autor")), a.text(from: 1))
         c.ok("handoff para \(to) registrado na cápsula de \(t.title)")
         if !t.repos.contains(to) {
-            c.error("  aviso: \(to) não faz parte desta trama · para incluir: trama puxar \(t.slug) \(to)")
+            c.error("  aviso: \(to) não faz parte desta trama · para incluir: trama sugerir \(to) \"motivo\" --trama \(t.slug)")
         }
     }
 

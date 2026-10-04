@@ -100,13 +100,14 @@ struct EmberButton: ButtonStyle {
 struct ToneButton: ButtonStyle {
     let color: Color
     let text: Color
+    var height: CGFloat = 28
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .font(.system(size: 12, weight: .medium))
             .foregroundStyle(text)
             .padding(.horizontal, 10)
-            .frame(height: 28)
+            .frame(height: height)
             .background(
                 RoundedRectangle(cornerRadius: 8)
                     .fill(color.opacity(configuration.isPressed ? 0.2 : 0.12))

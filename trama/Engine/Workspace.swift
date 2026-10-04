@@ -48,17 +48,23 @@ extension RepoConfig {
     }
 }
 
+public enum AgentPullPolicy: String, Codable, Sendable {
+    case free = "livre"
+    case approval = "aprovacao"
+}
+
 public struct Config: Codable, Sendable {
     public var version = 1
     public var branchPrefix = "trama/"
     public var defaultBranch = "main"
     public var context: String?
     public var capsuleFolder = "tramas"
+    public var agentPullPolicy = AgentPullPolicy.free
     public var repos: [RepoConfig] = []
 
     enum CodingKeys: String, CodingKey {
         case version = "versao", branchPrefix = "prefixoBranch", defaultBranch = "basePadrao"
-        case context = "contexto", capsuleFolder = "pastaCapsulas", repos
+        case context = "contexto", capsuleFolder = "pastaCapsulas", agentPullPolicy = "puxadaDeAgentes", repos
     }
 
     public init() {}
@@ -70,6 +76,7 @@ public struct Config: Codable, Sendable {
         defaultBranch = try c.decodeIfPresent(String.self, forKey: .defaultBranch) ?? ""
         context = try c.decodeIfPresent(String.self, forKey: .context)
         capsuleFolder = try c.decodeIfPresent(String.self, forKey: .capsuleFolder) ?? ""
+        agentPullPolicy = (try? c.decodeIfPresent(AgentPullPolicy.self, forKey: .agentPullPolicy)) ?? .free
         repos = try c.decodeIfPresent([RepoConfig].self, forKey: .repos) ?? []
         if branchPrefix.isEmpty { branchPrefix = "trama/" }
         if defaultBranch.isEmpty { defaultBranch = "main" }
@@ -245,6 +252,11 @@ public final class Workspace {
         let b = branch.trimmingCharacters(in: .whitespaces)
         guard !b.isEmpty else { throw TramaError("informe o nome da branch") }
         config.defaultBranch = b
+        try saveConfig()
+    }
+
+    public func setAgentPullPolicy(_ policy: AgentPullPolicy) throws {
+        config.agentPullPolicy = policy
         try saveConfig()
     }
 
