@@ -154,7 +154,6 @@ struct Delta: View {
             if removed > 0 { Text("−\(removed)").foregroundStyle(Theme.dangerText) }
         }
         .font(Theme.mono(11))
-        .contentTransition(.numericText())
     }
 }
 
@@ -204,21 +203,23 @@ struct FileList: View {
                     .font(.system(size: 11.5))
                     .padding(.horizontal, 6)
                 }
-                VStack(spacing: 3) {
-                    ForEach(changes) { c in
-                        FileRow(change: c, selected: c.id == selectedFile, checked: unchecked.map { !$0.wrappedValue.contains(c.id) }, discard: onDiscard.map { f in { f(c) } }, toggle: {
-                            guard let unchecked else { return }
-                            if unchecked.wrappedValue.contains(c.id) { unchecked.wrappedValue.remove(c.id) } else { unchecked.wrappedValue.insert(c.id) }
-                        }) {
-                            withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) { selectedFile = c.id }
+                ScrollView {
+                    LazyVStack(spacing: 3) {
+                        ForEach(changes) { c in
+                            FileRow(change: c, selected: c.id == selectedFile, checked: unchecked.map { !$0.wrappedValue.contains(c.id) }, discard: onDiscard.map { f in { f(c) } }, toggle: {
+                                guard let unchecked else { return }
+                                if unchecked.wrappedValue.contains(c.id) { unchecked.wrappedValue.remove(c.id) } else { unchecked.wrappedValue.insert(c.id) }
+                            }) {
+                                withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) { selectedFile = c.id }
+                            }
                         }
-                        .transition(.opacity.combined(with: .offset(x: -8)))
                     }
                 }
+                .scrollIndicators(.automatic)
+                .frame(height: min(CGFloat(changes.count) * 47, 380))
             }
             .padding(10)
         }
-        .animation(.easeOut(duration: 0.25), value: changes.map(\.id))
     }
 }
 
@@ -260,16 +261,17 @@ struct FileRow: View {
                     }
                 }
                 Spacer(minLength: 4)
-                if hovering, let discard {
+                if let discard {
                     Button(action: discard) {
                         Image(systemName: "arrow.uturn.backward")
                             .font(.system(size: 11))
                             .foregroundStyle(Theme.dangerText)
                     }
                     .buttonStyle(.plain)
+                    .opacity(hovering ? 1 : 0)
+                    .allowsHitTesting(hovering)
                     .help("Descartar mudanças deste arquivo")
                     .accessibilityLabel("Descartar mudanças do arquivo")
-                    .transition(.opacity)
                 }
                 Delta(added: change.added, removed: change.removed)
             }
@@ -280,7 +282,7 @@ struct FileRow: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .onHover { h in withAnimation(.easeOut(duration: 0.12)) { hovering = h } }
+        .onHover { hovering = $0 }
         .contextMenu {
             if let discard {
                 Button("Descartar mudanças…", role: .destructive, action: discard)
@@ -425,7 +427,7 @@ struct DiffPane: View {
                         }
                         .scrollIndicators(.automatic)
                     }
-                    .frame(minHeight: min(420, CGFloat(lines.count) * 20 + 12), maxHeight: .infinity)
+                    .frame(height: min(420, CGFloat(lines.count) * 20 + 12))
                     .id(change?.id)
                     .transition(.opacity)
                     if !picked.isEmpty, let c = change {

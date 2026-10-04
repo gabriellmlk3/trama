@@ -678,19 +678,23 @@ struct HomeTramaCard: View {
                     TramaIndicator(trama: trama, agents: agents)
                         .padding(.top, 4)
                 }
-                HStack(alignment: .bottom, spacing: 12) {
-                    ForEach(trama.status.prefix(7)) { s in
-                        RepoThread(status: s)
+                VStack(spacing: 0) {
+                    ForEach(Array(trama.status.prefix(4).enumerated()), id: \.element.id) { index, s in
+                        if index > 0 { Rectangle().fill(Theme.line).frame(height: 1) }
+                        RepoStatusRow(status: s)
                     }
-                    if trama.status.count > 7 {
-                        Text("+\(trama.status.count - 7)")
+                    if trama.status.count > 4 {
+                        Rectangle().fill(Theme.line).frame(height: 1)
+                        Text("+\(trama.status.count - 4) \(plural(trama.status.count - 4, "repositório", "repositórios"))")
                             .font(Theme.mono(10.5))
                             .foregroundStyle(Theme.faded)
-                            .padding(.bottom, 2)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal, 12)
+                            .frame(height: 28)
                     }
-                    Spacer(minLength: 0)
                 }
-                .frame(minHeight: 58, alignment: .bottom)
+                .background(RoundedRectangle(cornerRadius: 10).fill(Theme.background.opacity(0.45)))
+                .overlay(RoundedRectangle(cornerRadius: 10).stroke(Theme.line, lineWidth: 1))
                 HStack {
                     Text(summary)
                         .font(.system(size: 12))
@@ -721,7 +725,7 @@ struct HomeTramaCard: View {
         .buttonStyle(.plain)
         .onHover { hovering = $0 }
         .contextMenu {
-            Button("Abrir no Claude") { model.openClaudeInAll(trama) }
+            Button("Abrir agent") { model.openClaudeInAll(trama) }
             Button("Estacionar") { Task { await model.park(trama.slug) } }
             Button("Mostrar no Finder") { Terminal.reveal(trama.path) }
             Button("Copiar nome da branch") { Terminal.copy(trama.branch) }
@@ -729,34 +733,52 @@ struct HomeTramaCard: View {
     }
 }
 
-struct RepoThread: View {
+struct RepoStatusRow: View {
     let status: RepoStatus
 
+    private var inConflict: Bool { status.conflict == "conflito" }
+
     private var color: Color {
-        if status.conflict == "conflito" { return Theme.danger }
+        if inConflict { return Theme.danger }
         if status.changed > 0 { return Theme.ember }
         if status.ahead > 0 { return Theme.iris }
         if status.behind > 0 { return Theme.wait }
         return Theme.thread
     }
 
-    private var height: CGFloat {
-        18 + CGFloat(min(status.changed + status.ahead, 10)) * 3.2
+    private var clean: Bool {
+        !inConflict && status.changed == 0 && status.ahead == 0 && status.behind == 0
     }
 
     var body: some View {
-        VStack(spacing: 6) {
-            RoundedRectangle(cornerRadius: 1.5)
+        HStack(spacing: 10) {
+            Circle()
                 .fill(color)
-                .frame(width: 3, height: height)
-                .shadow(color: color.opacity(color == Theme.thread ? 0 : 0.55), radius: 4)
+                .frame(width: 7, height: 7)
+                .shadow(color: color.opacity(clean ? 0 : 0.6), radius: 3)
             Text(status.alias)
-                .font(Theme.mono(9.5))
-                .foregroundStyle(Theme.faded)
+                .font(Theme.mono(12))
+                .foregroundStyle(clean ? Theme.text3 : Theme.text2)
                 .lineLimit(1)
-                .frame(maxWidth: 46)
+                .truncationMode(.middle)
+            Spacer(minLength: 8)
+            HStack(spacing: 10) {
+                if inConflict { badge("conflito", Theme.dangerText) }
+                if status.changed > 0 { badge("~\(status.changed)", Theme.emberText) }
+                if status.ahead > 0 { badge("↑\(status.ahead)", Theme.irisText) }
+                if status.behind > 0 { badge("↓\(status.behind)", Theme.waitText) }
+                if clean { badge("em dia", Theme.faded) }
+            }
         }
+        .padding(.horizontal, 12)
+        .frame(height: 32)
         .help(help)
+    }
+
+    private func badge(_ text: String, _ tone: Color) -> some View {
+        Text(text)
+            .font(Theme.mono(11))
+            .foregroundStyle(tone)
     }
 
     private var help: String {
@@ -764,7 +786,7 @@ struct RepoThread: View {
         if status.changed > 0 { parts.append("\(status.changed) alterações") }
         if status.ahead > 0 { parts.append("\(status.ahead) à frente") }
         if status.behind > 0 { parts.append("\(status.behind) atrás") }
-        if status.conflict == "conflito" { parts.append("em conflito") }
+        if inConflict { parts.append("em conflito") }
         return parts.joined(separator: " · ")
     }
 }

@@ -44,7 +44,7 @@ struct TramaApp: App {
                 Button("Início") { model.screen = .home }
                     .keyboardShortcut("0")
                 Divider()
-                Button("Abrir no Claude") {
+                Button("Abrir agent") {
                     if let t = model.selectedTrama { model.openClaudeInAll(t) }
                 }
                 .keyboardShortcut(.return, modifiers: [.command])

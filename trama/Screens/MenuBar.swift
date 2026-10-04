@@ -160,7 +160,7 @@ struct ActiveTramaCard: View {
                     model.openClaudeInAll(trama)
                     openApp()
                 } label: {
-                    Label("Abrir no Claude", systemImage: "sparkle")
+                    Label("Abrir agent", systemImage: "sparkle")
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(EmberButton(compact: true))

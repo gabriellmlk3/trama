@@ -30,6 +30,10 @@ struct ContentView: View {
             NewTramaView()
                 .environmentObject(model)
         }
+        .sheet(item: $model.agentDialog) { t in
+            TramaAgentDialog(slug: t.slug)
+                .environmentObject(model)
+        }
         .sheet(item: $model.resuming) { t in
             ResumeView(trama: t)
                 .environmentObject(model)
@@ -113,9 +117,39 @@ struct EmptyStateHero: View {
 
 struct Banners: View {
     @EnvironmentObject var model: AppModel
+    @State private var expiredPermission: String?
+
+    var permissionKey: String? {
+        model.permissionRequest.map { "\($0.trama.slug)/\($0.repo ?? "")/\($0.summary)" }
+    }
 
     var body: some View {
         VStack(spacing: 8) {
+            if model.agentDialog == nil, let request = model.permissionRequest, permissionKey != expiredPermission {
+                Button {
+                    model.openAgent(request.trama, repo: request.repo)
+                } label: {
+                    HStack(spacing: 8) {
+                        Dot(color: Theme.wait, halo: true)
+                        Text("\(request.trama.title)\(request.repo.map { " · \($0)" } ?? ""): o agent pediu permissão — \(request.summary)")
+                            .foregroundStyle(Theme.text2)
+                            .lineLimit(2)
+                        Text("Abrir").foregroundStyle(Theme.waitText)
+                    }
+                    .font(.system(size: 12.5))
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 10)
+                    .frame(maxWidth: 620, alignment: .leading)
+                    .background(RoundedRectangle(cornerRadius: 10).fill(Color(hex: 0x1C1812)))
+                    .overlay(RoundedRectangle(cornerRadius: 10).stroke(Theme.wait.opacity(0.45), lineWidth: 1))
+                }
+                .buttonStyle(.plain)
+                .task(id: permissionKey) {
+                    try? await Task.sleep(for: .seconds(8))
+                    guard !Task.isCancelled else { return }
+                    expiredPermission = permissionKey
+                }
+            }
             if let notice = model.notice {
                 HStack(spacing: 8) {
                     Image(systemName: "checkmark").foregroundStyle(Theme.okText)
@@ -151,6 +185,7 @@ struct Banners: View {
             }
         }
         .padding(.bottom, 18)
+        .animation(.easeOut(duration: 0.2), value: expiredPermission)
         .animation(.easeOut(duration: 0.2), value: model.notice)
         .animation(.easeOut(duration: 0.2), value: model.error)
     }

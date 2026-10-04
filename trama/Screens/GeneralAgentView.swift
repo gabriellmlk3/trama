@@ -32,13 +32,13 @@ struct GeneralAgentView<Hero: View>: View {
     }
 
     private var inputBar: some View {
-        AgentInputBar(draft: $draft, running: session.running, focused: $focused, onSend: send, onStop: { session.stop() }, onReset: items.isEmpty ? nil : { session.reset() })
+        AgentInputBar(draft: $draft, running: session.running, focused: $focused, attachmentsDir: session.attachmentsDir, onSend: send, onStop: { session.stop() }, onReset: items.isEmpty ? nil : { session.reset() })
     }
 
-    private func send() {
+    private func send(_ attachments: [AgentAttachment]) {
         let text = draft
         draft = ""
-        session.send(text)
+        session.send(text, attachments: attachments)
     }
 }
 
@@ -56,6 +56,15 @@ struct AgentConversationList: View {
                             .id(item.id)
                     }
                     if session.running { AgentWorking() }
+                    if !session.running {
+                        ForEach(session.pendingPermissions, id: \.self) { denial in
+                            AgentPermissionCard(
+                                denial: denial,
+                                onAllow: { session.allow(denial, forSession: $0) },
+                                onDeny: { session.deny(denial) }
+                            )
+                        }
+                    }
                     Color.clear.frame(height: 1).id("bottom")
                 }
                 .padding(.vertical, 16)
@@ -63,12 +72,63 @@ struct AgentConversationList: View {
                 .frame(maxWidth: 900, alignment: .leading)
                 .frame(maxWidth: .infinity)
             }
+            .defaultScrollAnchor(.bottom)
+            .onAppear {
+                DispatchQueue.main.async { proxy.scrollTo("bottom", anchor: .bottom) }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { proxy.scrollTo("bottom", anchor: .bottom) }
+            }
             .onChange(of: items.last) { _, _ in
                 withAnimation(.easeOut(duration: 0.15)) {
                     proxy.scrollTo("bottom", anchor: .bottom)
                 }
             }
+            .onChange(of: session.pendingPermissions) { _, _ in
+                withAnimation(.easeOut(duration: 0.15)) {
+                    proxy.scrollTo("bottom", anchor: .bottom)
+                }
+            }
         }
+    }
+}
+
+private struct AgentPermissionCard: View {
+    let denial: AgentDenial
+    let onAllow: (_ forSession: Bool) -> Void
+    let onDeny: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Label("O agent pediu permissão", systemImage: "lock.shield")
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(Theme.waitText)
+            Text(denial.summary)
+                .font(Theme.mono(11.5))
+                .foregroundStyle(Theme.text3)
+                .lineLimit(3)
+                .textSelection(.enabled)
+            HStack(spacing: 8) {
+                if let directory = denial.directory {
+                    Button("Liberar a pasta \(Paths.name(directory))") { onAllow(true) }
+                        .buttonStyle(ToneButton(color: Theme.wait, text: Theme.waitText))
+                        .help("Dá acesso a \(directory) até o fim desta sessão")
+                } else {
+                    Button("Permitir uma vez") { onAllow(false) }
+                        .buttonStyle(ToneButton(color: Theme.wait, text: Theme.waitText))
+                    if let rule = denial.sessionRule {
+                        Button("Nesta sessão") { onAllow(true) }
+                            .buttonStyle(GhostButton(compact: true))
+                            .help("Libera \(rule) até o fim desta sessão")
+                    }
+                }
+                Button("Negar", action: onDeny)
+                    .buttonStyle(GhostButton(compact: true))
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 8).fill(Theme.surface))
+        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Theme.wait.opacity(0.45), lineWidth: 1))
     }
 }
 
@@ -83,30 +143,68 @@ private struct AgentWorking: View {
     }
 }
 
-private struct AgentInputBar: View {
+struct AgentInputBar: View {
     @Binding var draft: String
     let running: Bool
     var focused: FocusState<Bool>.Binding
-    let onSend: () -> Void
+    var attachmentsDir: String?
+    let onSend: ([AgentAttachment]) -> Void
     let onStop: () -> Void
     let onReset: (() -> Void)?
+    @State private var attachments: [AgentAttachment] = []
+    @EnvironmentObject private var model: AppModel
 
     private var canSend: Bool {
-        !running && !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        !running && (!draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !attachments.isEmpty)
+    }
+
+    private func send() {
+        guard canSend else { return }
+        let files = attachments
+        attachments = []
+        onSend(files)
+    }
+
+    private func attachFromPanel() {
+        guard let attachmentsDir else { return }
+        let result = AgentPasteboard.store(AgentPasteboard.chooseFiles(), into: attachmentsDir)
+        attachments.append(contentsOf: result.attachments)
+        if !result.errors.isEmpty { model.showError(result.errors.joined(separator: "\n")) }
     }
 
     var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if !attachments.isEmpty {
+                AttachmentChips(items: attachments) { item in
+                    attachments.removeAll { $0 == item }
+                    AgentAttachments.discard(item)
+                }
+            }
+            inputRow
+        }
+        .agentAttachmentInput($attachments, focused: focused, directory: attachmentsDir)
+    }
+
+    private var inputRow: some View {
         HStack(alignment: .bottom, spacing: 8) {
-            TextField("Pergunte ou peça algo sobre suas tramas…", text: $draft, axis: .vertical)
+            TextField("Pergunte ou peça algo · cole ou arraste imagens, PDFs e arquivos", text: $draft, axis: .vertical)
                 .textFieldStyle(.plain)
                 .font(.system(size: 13.5))
                 .lineLimit(1...6)
                 .focused(focused)
-                .onSubmit { if canSend { onSend() } }
+                .onSubmit(send)
                 .padding(.horizontal, 12)
                 .padding(.vertical, 10)
                 .background(RoundedRectangle(cornerRadius: 10).fill(Theme.field))
                 .overlay(RoundedRectangle(cornerRadius: 10).stroke(Theme.line2, lineWidth: 1))
+            if attachmentsDir != nil {
+                Button(action: attachFromPanel) {
+                    Image(systemName: "paperclip")
+                }
+                .buttonStyle(IconButton(size: 38))
+                .help("Anexar arquivos · também dá para colar (⌘V) ou arrastar")
+                .accessibilityLabel("Anexar arquivos")
+            }
             if running {
                 Button(action: onStop) {
                     Image(systemName: "stop.fill")
@@ -115,7 +213,7 @@ private struct AgentInputBar: View {
                 .help("Interromper")
                 .accessibilityLabel("Interromper")
             } else {
-                Button(action: onSend) {
+                Button(action: send) {
                     Image(systemName: "arrow.up")
                         .font(.system(size: 13, weight: .bold))
                         .foregroundStyle(canSend ? Theme.emberDark : Theme.faded)
@@ -144,14 +242,24 @@ struct AgentItemRow: View {
     var body: some View {
         switch item.kind {
         case .user:
-            Text(item.text)
-                .font(.system(size: 13.5))
-                .textSelection(.enabled)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 8)
-                .background(RoundedRectangle(cornerRadius: 10).fill(Theme.surface2))
-                .frame(maxWidth: .infinity, alignment: .trailing)
-                .padding(.leading, 80)
+            VStack(alignment: .trailing, spacing: 6) {
+                if !item.text.isEmpty {
+                    Text(item.text)
+                        .font(.system(size: 13.5))
+                        .textSelection(.enabled)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 8)
+                        .background(RoundedRectangle(cornerRadius: 10).fill(Theme.surface2))
+                }
+                if !item.attachments.isEmpty {
+                    Label(item.attachments.joined(separator: ", "), systemImage: "paperclip")
+                        .font(.system(size: 11.5))
+                        .foregroundStyle(Theme.faded)
+                        .lineLimit(2)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .trailing)
+            .padding(.leading, 80)
         case .assistant:
             Text(markdown(item.text))
                 .font(.system(size: 13.5))

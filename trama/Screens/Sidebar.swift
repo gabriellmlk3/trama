@@ -134,7 +134,7 @@ struct TramaItem: View {
                         .lineLimit(1)
                 }
                 Spacer(minLength: 4)
-                TramaIndicator(trama: trama, agents: model.agents(for: trama.slug))
+                TramaIndicator(trama: trama, agents: model.agents(for: trama.slug), docked: model.hasBusyAgent(in: trama.slug), permissions: model.permissionCount(in: trama.slug))
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 9)
@@ -145,7 +145,7 @@ struct TramaItem: View {
         .buttonStyle(.plain)
         .contextMenu {
             if trama.isActive {
-                Button("Abrir no Claude") { model.openClaudeInAll(trama) }
+                Button("Abrir agent") { model.openClaudeInAll(trama) }
                 Button("Estacionar") { Task { await model.park(trama.slug) } }
             } else {
                 Button("Retomar…") { model.resuming = trama }
@@ -159,6 +159,8 @@ struct TramaItem: View {
 struct TramaIndicator: View {
     let trama: LiveTrama
     let agents: [Agent]
+    var docked = false
+    var permissions = 0
 
     var body: some View {
         let waiting = agents.filter { $0.isWaiting }.count
@@ -167,9 +169,16 @@ struct TramaIndicator: View {
             if trama.isParked {
                 Text(relativeTime(trama.parkedAt).replacingOccurrences(of: "há ", with: ""))
                     .foregroundStyle(Theme.faded)
+            } else if permissions > 0 {
+                Dot(color: Theme.wait, halo: true)
+                Text("\(permissions + waiting)").foregroundStyle(Theme.wait)
+                    .help("Um agent embutido pediu permissão")
             } else if waiting > 0 {
                 Dot(color: Theme.wait)
                 Text("\(waiting)").foregroundStyle(Theme.wait)
+            } else if docked {
+                Dot(color: Theme.ember, halo: true)
+                    .help("Um agent embutido está respondendo")
             } else if working > 0 {
                 Dot(color: Theme.iris, halo: true)
                 Text("\(working)").foregroundStyle(Theme.irisText)

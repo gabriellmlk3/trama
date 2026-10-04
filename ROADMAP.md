@@ -89,7 +89,7 @@ Convenções do projeto: veja `CLAUDE.md`. Lógica nova vai em `trama/Engine/` (
 **Como.**
 - `RepoConfig.editor` com detecção automática: `.xcodeproj` → Xcode, `build.gradle` → Android Studio, `package.json` → Cursor ou VS Code.
 - Terminal escolhido nos Ajustes: Terminal, iTerm2, Ghostty ou Warp. O Terminal continua com o `.command`; para os outros, o jeito de abrir numa pasta e rodar `claude` de cada um.
-- Botão "abrir no editor" em cada linha do tear e em "Abrir no Claude".
+- Botão "abrir no editor" em cada linha do tear e em "Abrir agent".
 
 **Pronto quando** cada repositório abre no editor certo e o `claude` sobe no terminal escolhido.
 

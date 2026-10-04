@@ -8,7 +8,7 @@ struct PreferencesView: View {
     @State private var localError: String?
     @State private var defaultBranch = ""
     @State private var pullPolicy = AgentPullPolicy.free
-    @AppStorage(ClaudeTarget.storageKey) private var claudeTarget = ClaudeTarget.cli.rawValue
+    @AppStorage(ClaudeTarget.storageKey) private var claudeTarget = ClaudeTarget.docked.rawValue
     @AppStorage(AgentScope.storageKey) private var agentScope = AgentScope.single.rawValue
     @State private var editingRecipe: RepoConfig?
     @State private var toolVersions: [String: String?] = [:]
@@ -35,7 +35,7 @@ struct PreferencesView: View {
                 }
                 .pickerStyle(.segmented)
             } footer: {
-                Text("Um agent para a trama abre o Claude na raiz dela, com acesso a todos os repositórios (no Desktop, só a pasta da trama). Vale para “Abrir no Claude”, “Revisar” e para abrir agentes ao criar uma trama.")
+                Text("Agent acoplado abre uma janela no app, com a conversa e a lista de sessões da trama (sempre um agent na raiz dela, com todos os repositórios). Console embutido e Claude Desktop abrem o Claude Code como antes; neles, “Ao abrir uma trama” define um agent para a trama (raiz, com todos os repositórios; no Desktop, só a pasta da trama) ou um por repositório. Vale para “Abrir agent”, “Revisar” e para abrir agentes ao criar uma trama.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

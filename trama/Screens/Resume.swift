@@ -92,7 +92,7 @@ struct ResumeView: View {
                 .buttonStyle(GhostButton())
                 Spacer()
                 if results != nil {
-                    Button("Abrir no Claude") {
+                    Button("Abrir agent") {
                         model.openClaudeInAll(trama)
                         dismiss()
                     }

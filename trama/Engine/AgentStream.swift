@@ -5,12 +5,59 @@ enum AgentBlock: Equatable {
     case toolUse(id: String, name: String, summary: String)
 }
 
+struct AgentDenial: Equatable, Hashable {
+    var tool: String
+    var detail: String
+    var directory: String?
+
+    init(tool: String, input: [String: Any]) {
+        self.tool = tool
+        let command = input["command"] as? String
+        let file = input["file_path"] as? String
+        detail = (command ?? file ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        directory = file.flatMap { $0.hasPrefix("/") ? ($0 as NSString).deletingLastPathComponent : nil }
+    }
+
+    var summary: String {
+        let line = detail.split(separator: "\n").first.map(String.init) ?? ""
+        return line.isEmpty ? tool : "\(tool) `\(line.count > 90 ? String(line.prefix(90)) + "…" : line)`"
+    }
+
+    var onceRule: String? {
+        if directory != nil { return nil }
+        if tool == "Bash", !detail.isEmpty { return "Bash(\(detail))" }
+        return tool
+    }
+
+    var sessionRule: String? {
+        if directory != nil { return nil }
+        guard tool == "Bash", !detail.isEmpty else { return tool }
+        guard let word = detail.split(whereSeparator: \.isWhitespace).first else { return nil }
+        return "Bash(\(word) *)"
+    }
+}
+
 struct AgentResult: Equatable {
     var isError: Bool
     var message: String?
     var costUSD: Double?
     var durationMS: Int?
-    var deniedTools: [String]
+    var denials: [AgentDenial]
+
+    var deniedTools: [String] { denials.map(\.summary) }
+}
+
+enum AgentCLI {
+    static let baseTools = ["Read", "Grep", "Glob", "Bash(trama *)", "Bash(git status*)", "Bash(git diff*)", "Bash(git log*)"]
+
+    static func arguments(role: String, sessionID: String?, extraTools: [String], directories: [String]) -> [String] {
+        var args = ["-p", "--output-format", "stream-json", "--verbose", "--include-partial-messages", "--permission-mode", "acceptEdits"]
+        args += ["--allowedTools"] + baseTools + extraTools
+        args += ["--append-system-prompt", role]
+        if let sessionID { args += ["--resume", sessionID] }
+        args += directories.flatMap { ["--add-dir", $0] }
+        return args
+    }
 }
 
 enum AgentEvent: Equatable {
@@ -88,19 +135,16 @@ struct AgentStreamParser {
     }
 
     private func parseResult(_ object: [String: Any]) -> AgentResult {
-        let denials = (object["permission_denials"] as? [[String: Any]] ?? []).compactMap { denial -> String? in
+        let denials = (object["permission_denials"] as? [[String: Any]] ?? []).compactMap { denial -> AgentDenial? in
             guard let name = denial["tool_name"] as? String else { return nil }
-            let input = denial["tool_input"] as? [String: Any] ?? [:]
-            let detail = (input["command"] as? String) ?? (input["file_path"] as? String) ?? ""
-            let line = detail.split(separator: "\n").first.map(String.init) ?? ""
-            return line.isEmpty ? name : "\(name) `\(line.count > 90 ? String(line.prefix(90)) + "…" : line)`"
+            return AgentDenial(tool: name, input: denial["tool_input"] as? [String: Any] ?? [:])
         }
         return AgentResult(
             isError: object["is_error"] as? Bool ?? false,
             message: object["result"] as? String,
             costUSD: object["total_cost_usd"] as? Double,
             durationMS: object["duration_ms"] as? Int,
-            deniedTools: denials
+            denials: denials
         )
     }
 
@@ -138,6 +182,7 @@ struct AgentItem: Identifiable, Equatable {
     var result: String?
     var resultIsError = false
     var isLive = false
+    var attachments: [String] = []
 }
 
 struct AgentConversation: Equatable {
@@ -147,8 +192,13 @@ struct AgentConversation: Equatable {
     private(set) var costUSD: Double = 0
     private var nextID = 0
 
-    mutating func addUser(_ text: String) {
+    mutating func addUser(_ text: String, attachments: [String] = []) {
         append(.user, text)
+        items[items.count - 1].attachments = attachments
+    }
+
+    mutating func addHistory(_ turns: [(isUser: Bool, text: String)]) {
+        for turn in turns { append(turn.isUser ? .user : .assistant, turn.text) }
     }
 
     mutating func addNotice(_ text: String) {

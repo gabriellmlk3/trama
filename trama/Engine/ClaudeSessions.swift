@@ -29,6 +29,30 @@ public enum ClaudeSessions {
             }
     }
 
+    public static func transcript(id: String, at path: String, limit: Int = 60, home: String = Paths.home) -> [(isUser: Bool, text: String)] {
+        guard let file = conversationFiles(at: path, home: home).first(where: { $0.id == id }),
+              let text = try? String(contentsOfFile: file.path, encoding: .utf8) else { return [] }
+        var turns: [(isUser: Bool, text: String)] = []
+        for line in text.split(separator: "\n") {
+            guard let object = try? JSONSerialization.jsonObject(with: Data(line.utf8)) as? [String: Any],
+                  object["isMeta"] as? Bool != true,
+                  object["isSidechain"] as? Bool != true,
+                  let message = object["message"] as? [String: Any] else { continue }
+            switch object["type"] as? String {
+            case "user":
+                guard let content = message["content"] as? String, !content.hasPrefix("<") else { continue }
+                turns.append((true, content))
+            case "assistant":
+                let parts = (message["content"] as? [[String: Any]] ?? []).compactMap { $0["type"] as? String == "text" ? $0["text"] as? String : nil }
+                let joined = parts.joined(separator: "\n")
+                if !joined.isEmpty { turns.append((false, joined)) }
+            default:
+                continue
+            }
+        }
+        return Array(turns.suffix(limit))
+    }
+
     private struct ConversationFile {
         var id: String
         var path: String

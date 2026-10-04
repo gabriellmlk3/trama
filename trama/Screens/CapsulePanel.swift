@@ -330,11 +330,19 @@ struct HandoffsSection: View {
                             Label("recebido", systemImage: "checkmark")
                                 .foregroundStyle(Theme.okText)
                         } else {
-                            Button("Marcar recebido") {
-                                Task { await model.confirmHandoff(item.index, trama: trama.slug) }
+                            HStack(spacing: 12) {
+                                if trama.isActive {
+                                    Button("Abrir agent") { model.openAgent(trama, handoff: item) }
+                                        .buttonStyle(.plain)
+                                        .foregroundStyle(Theme.emberLight)
+                                        .help("Abre o agent de \(item.to ?? "esta trama") já com este handoff")
+                                }
+                                Button("Marcar recebido") {
+                                    Task { await model.confirmHandoff(item.index, trama: trama.slug) }
+                                }
+                                .buttonStyle(.plain)
+                                .foregroundStyle(Theme.emberLight)
                             }
-                            .buttonStyle(.plain)
-                            .foregroundStyle(Theme.emberLight)
                         }
                     }
                     .font(.system(size: 11.5))

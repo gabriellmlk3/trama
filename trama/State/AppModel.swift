@@ -38,8 +38,33 @@ final class AppModel: ObservableObject {
     private var agentsLoop: Task<Void, Never>?
     @Published var proposal: Proposal?
     @Published var homeShowsConversation = false
+    @Published var agentDialog: LiveTrama?
+    private var tramaAgents: [String: GeneralAgentSession] = [:]
+    private var agentWatchers: [String: AnyCancellable] = [:]
+    @Published private(set) var busyAgents: Set<String> = []
+    @Published var agentDialogRepo: String?
+    @Published var agentDialogDirect = false
+    private var lastAgentScope: [String: String] = [:]
 
-    var waitingCount: Int { activeAgents.filter { $0.isWaiting }.count }
+    @Published private(set) var permissionCounts: [String: Int] = [:]
+
+    var permissionCount: Int { permissionCounts.values.reduce(0, +) }
+
+    var waitingCount: Int { activeAgents.filter { $0.isWaiting }.count + permissionCount }
+
+    func permissionCount(in slug: String) -> Int {
+        permissionCounts.filter { $0.key == slug || $0.key.hasPrefix(slug + "/") }.values.reduce(0, +)
+    }
+
+    var permissionRequest: (trama: LiveTrama, repo: String?, summary: String)? {
+        for key in permissionCounts.keys.sorted() {
+            let parts = key.split(separator: "/", maxSplits: 1).map(String.init)
+            guard let trama = state?.tramas.first(where: { $0.slug == parts[0] }),
+                  let session = tramaAgents[key], let first = session.pendingPermissions.first else { continue }
+            return (trama, parts.count > 1 ? parts[1] : nil, first.summary)
+        }
+        return nil
+    }
 
     func start() {
         guard loop == nil else { return }
@@ -49,6 +74,11 @@ final class AppModel: ObservableObject {
             if !self.terminals.focus(path: path) {
                 self.terminals.open(path: path, command: claudeCommand(path: path), title: "\(Paths.name(path)) · claude", blocks: false)
             }
+        }
+        Notifier.shared.onOpenDocked = { [weak self] slug, repo in
+            guard let self, let trama = self.state?.tramas.first(where: { $0.slug == slug }) else { return }
+            self.select(slug)
+            self.openAgent(trama, repo: repo)
         }
         Notifier.shared.start()
         NotificationCenter.default.addObserver(forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
@@ -495,11 +525,103 @@ final class AppModel: ObservableObject {
         if let existing = homeAgentSession { return existing }
         let root = state?.root ?? Workspace.defaultRoot()
         let session = GeneralAgentSession(path: root, extraDirs: [state?.context].compactMap { $0 })
+        session.attachmentsDir = AgentAttachments.directory(root: root)
         homeAgentSession = session
         return session
     }
 
+    private func agentKey(_ slug: String, _ repo: String?) -> String {
+        repo.map { "\(slug)/\($0)" } ?? slug
+    }
+
+    func tramaAgent(for slug: String, repo: String? = nil) -> GeneralAgentSession? {
+        tramaAgents[agentKey(slug, repo)]
+    }
+
+    func isAgentBusy(_ slug: String, repo: String? = nil) -> Bool {
+        busyAgents.contains(agentKey(slug, repo))
+    }
+
+    func hasBusyAgent(in slug: String) -> Bool {
+        busyAgents.contains { $0 == slug || $0.hasPrefix(slug + "/") }
+    }
+
+    func agentPath(_ t: LiveTrama, repo: String?) -> String {
+        repo.map { worktreePath(t, $0) } ?? t.path
+    }
+
+    @discardableResult
+    func startTramaAgent(_ t: LiveTrama, repo: String? = nil, resume: String?) -> GeneralAgentSession {
+        let key = agentKey(t.slug, repo)
+        tramaAgents[key]?.stop()
+        let session: GeneralAgentSession
+        if let repo {
+            let role = TramaAgent.repoInstructions(title: t.title, branch: t.branch, repo: repo, others: t.repos.filter { $0 != repo })
+            session = GeneralAgentSession(path: worktreePath(t, repo), extraDirs: [], role: role, resume: resume)
+        } else {
+            let role = TramaAgent.instructions(title: t.title, branch: t.branch, repos: t.repos)
+            session = GeneralAgentSession(path: t.path, extraDirs: t.repos.map { worktreePath(t, $0) }, role: role, resume: resume)
+        }
+        session.attachmentsDir = AgentAttachments.directory(root: state?.root ?? Workspace.defaultRoot())
+        lastAgentScope[t.slug] = repo ?? ""
+        let label = repo.map { "\(t.title) · \($0)" } ?? t.title
+        session.onTurnEnd = { [weak self] finished in
+            self?.agentTurnEnded(finished, slug: t.slug, repo: repo, label: label)
+        }
+        agentWatchers[key] = session.$running.removeDuplicates().sink { [weak self] running in
+            guard let self else { return }
+            if running { self.busyAgents.insert(key) } else { self.busyAgents.remove(key) }
+        }
+        agentWatchers["permission:" + key] = session.$pendingPermissions.map(\.count).removeDuplicates().sink { [weak self] count in
+            guard let self else { return }
+            if count > 0 { self.permissionCounts[key] = count } else { self.permissionCounts.removeValue(forKey: key) }
+        }
+        tramaAgents[key] = session
+        return session
+    }
+
+    private func agentTurnEnded(_ session: GeneralAgentSession, slug: String, repo: String?, label: String) {
+        let waiting = !session.pendingPermissions.isEmpty
+        let reply = session.lastReply?.split(whereSeparator: \.isNewline).first.map(String.init) ?? ""
+        let body = waiting ? "Pediu permissão: \(session.pendingPermissions[0].summary)" : (reply.isEmpty ? "Sua vez." : String(reply.prefix(140)))
+        Notifier.shared.postDocked(title: label, waiting: waiting, body: body, slug: slug, repo: repo)
+    }
+
+    func openAgent(_ t: LiveTrama, repo: String? = nil, handoff: CapsuleItem? = nil) {
+        agentDialogDirect = false
+        if let handoff {
+            let target = handoff.to.flatMap { t.repos.contains($0) ? $0 : nil } ?? repo
+            let session = startTramaAgent(t, repo: target, resume: nil)
+            session.send(TramaAgent.handoffPrompt(from: handoff.from, to: handoff.to, number: handoff.index, text: handoff.text))
+            agentDialogRepo = target
+            agentDialogDirect = true
+        } else {
+            let target = repo ?? lastAgentScope[t.slug].flatMap { $0.isEmpty ? nil : $0 }
+            agentDialogRepo = target
+            agentDialogDirect = tramaAgents[agentKey(t.slug, target)] != nil && (repo != nil || lastAgentScope[t.slug] != nil)
+        }
+        agentDialog = t
+    }
+
+    func rememberAgent(slug: String, repo: String?) {
+        lastAgentScope[slug] = repo ?? ""
+    }
+
+    func openTramaInConsole(_ t: LiveTrama, repo: String? = nil, resume: ClaudeResume) {
+        if let repo {
+            let path = worktreePath(t, repo)
+            terminals.open(path: path, command: claudeCommand(path: path, resume: resume), title: "\(repo) · claude", blocks: false)
+            return
+        }
+        let extra = t.repos.map { worktreePath(t, $0) }
+        terminals.open(path: t.path, command: claudeCommand(path: t.path, resume: resume, extraDirs: extra), title: "\(t.title) · claude", blocks: false)
+    }
+
     func openClaudeInAll(_ t: LiveTrama, target: ClaudeTarget = .current, scope: AgentScope = .current) {
+        if target == .docked {
+            openAgent(t)
+            return
+        }
         switch scope {
         case .single:
             let extra = t.repos.map { worktreePath(t, $0) }
@@ -572,7 +694,7 @@ final class AppModel: ObservableObject {
 
     func openClaude(path: String, repo: String, target: ClaudeTarget = .current, extraDirs: [String] = []) {
         switch target {
-        case .cli:
+        case .cli, .docked:
             terminals.open(path: path, command: claudeCommand(path: path, extraDirs: extraDirs), title: "\(repo) · claude", blocks: false)
         case .desktop:
             guard let url = ClaudeTarget.desktopURL(folder: path), NSWorkspace.shared.open(url) else {

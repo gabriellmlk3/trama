@@ -28,3 +28,34 @@ public enum HomeAgent {
         "Ajuste a proposta atual e envie outra com `trama propor`: \(note)"
     }
 }
+
+public enum TramaAgent {
+    public static func instructions(title: String, branch: String, repos: [String]) -> String {
+        """
+        Você é o agent da trama “\(title)” (branch \(branch)), aberto dentro do app Trama. O diretório atual é a raiz da trama; cada repositório (\(repos.joined(separator: ", "))) tem o seu worktree numa subpasta com o nome dele. Trabalhe só nesses worktrees e não troque de branch.
+
+        Comece lendo a cápsula com `trama capsula` (objetivo, decisões, handoffs e pendências). Registre o que o próximo agente precisa saber com `trama decisao`, `trama handoff <repo> "texto"`, `trama pendencia` e `trama nota`. Responda em português do Brasil, de forma curta.
+
+        Comandos Bash fora de `trama`, `git status`, `git diff` e `git log` pedem a aprovação do usuário no app: quando precisar de um, tente rodá-lo; se for negado, o app mostra o pedido e você retoma quando ele liberar. Não rode `trama pr`, não arquive nem apague tramas.
+        """
+    }
+
+    public static func repoInstructions(title: String, branch: String, repo: String, others: [String]) -> String {
+        let siblings = others.isEmpty
+            ? "Esta trama só tem este repositório."
+            : "Os outros repositórios da trama (\(others.joined(separator: ", "))) têm seus próprios agents: para pedir algo a eles use `trama handoff <repo> \"texto\"`."
+        return """
+        Você é o agent do repositório “\(repo)” na trama “\(title)” (branch \(branch)), aberto dentro do app Trama. O diretório atual é o worktree de \(repo): trabalhe só nele e não troque de branch. \(siblings)
+
+        Comece lendo a cápsula com `trama capsula` (objetivo, decisões, handoffs e pendências) e o CLAUDE.md do repositório, se existir; siga o que ele diz sobre build e testes. Registre o que o próximo agente precisa saber com `trama decisao`, `trama handoff <repo> "texto"`, `trama pendencia` e `trama nota`. Se houver handoff endereçado a \(repo), assuma-o e marque com `trama recebido <n>`. Responda em português do Brasil, de forma curta.
+
+        Comandos Bash fora de `trama`, `git status`, `git diff` e `git log` pedem a aprovação do usuário no app: quando precisar de um, tente rodá-lo; se for negado, o app mostra o pedido e você retoma quando ele liberar. Não rode `trama pr`, não arquive nem apague tramas.
+        """
+    }
+
+    public static func handoffPrompt(from: String?, to: String?, number: Int, text: String) -> String {
+        let origin = from.flatMap { $0.isEmpty ? nil : $0 } ?? "outro agente"
+        let target = to.flatMap { $0.isEmpty ? nil : $0 } ?? "esta trama"
+        return "Há um handoff #\(number) de \(origin) para \(target): \(text)\n\nLeia a cápsula (`trama capsula`), marque o handoff com `trama recebido \(number)` e comece a executá-lo. Se algo estiver ambíguo, pergunte antes de mudar código."
+    }
+}

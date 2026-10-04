@@ -55,6 +55,7 @@ struct InsideDetail: View {
             VStack(alignment: .leading, spacing: 6) {
                 SyncRow(status: status)
                 AgentRow(status: status)
+                HandoffRow(repo: repo, trama: trama)
                 PrepRow(repo: repo, trama: trama, status: status)
                 ServicesRow(repo: repo, trama: trama, status: status)
                 PullRequestRow(repo: repo, trama: trama)
@@ -85,6 +86,16 @@ struct InsideDetail: View {
                 .buttonStyle(IconButton())
                 .help("Abrir o worktree de \(repo.name) no editor")
                 .accessibilityLabel("Abrir \(repo.name) no editor")
+                if trama.isActive {
+                    Button {
+                        model.openAgent(trama, repo: repo.name)
+                    } label: {
+                        Image(systemName: model.isAgentBusy(trama.slug, repo: repo.name) ? "ellipsis.bubble" : "bubble.left.and.text.bubble.right")
+                    }
+                    .buttonStyle(IconButton())
+                    .help("Agent embutido de \(repo.name) · só este worktree")
+                    .accessibilityLabel("Abrir o agent embutido de \(repo.name)")
+                }
                 ClaudeMenu(path: path, repo: repo.name)
                 AppMenu {
                     Image(systemName: "ellipsis")
@@ -98,6 +109,34 @@ struct InsideDetail: View {
                 }
                 .buttonStyle(.plain)
                 .help("Mais ações")
+            }
+        }
+    }
+}
+
+struct HandoffRow: View {
+    @EnvironmentObject var model: AppModel
+    let repo: RepoConfig
+    let trama: LiveTrama
+
+    var body: some View {
+        if let capsule = model.capsule, capsule.trama == trama.slug {
+            let open = capsule.openHandoffs.filter { $0.to == repo.name }
+            if let first = open.first {
+                HStack(spacing: 8) {
+                    Image(systemName: "arrow.down.right.circle")
+                        .foregroundStyle(Theme.emberLight)
+                    Text(open.count == 1 ? "Handoff pendente" : "\(open.count) handoffs pendentes")
+                        .foregroundStyle(Theme.emberLight)
+                    if trama.isActive {
+                        Button("abrir agent") { model.openAgent(trama, repo: repo.name, handoff: first) }
+                            .buttonStyle(.plain)
+                            .foregroundStyle(Theme.text3)
+                            .help("Abre o agent de \(repo.name) já com o handoff: \(first.text)")
+                    }
+                }
+                .font(.system(size: 12.5))
+                .lineLimit(1)
             }
         }
     }

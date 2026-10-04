@@ -181,9 +181,15 @@ struct TramaHeader: View {
                     Button {
                         model.openClaudeInAll(trama)
                     } label: {
-                        Label("Abrir no Claude", systemImage: "sparkle")
+                        Label("Abrir agent", systemImage: "sparkle")
                     }
                     .buttonStyle(EmberButton())
+                    .overlay(alignment: .topTrailing) {
+                        if model.permissionCount(in: trama.slug) > 0 {
+                            Dot(color: Theme.wait, halo: true)
+                                .offset(x: 4, y: -4)
+                        }
+                    }
                     .help("Abre o Claude Code na trama: um agent com todos os repositórios, ou um por repositório (Ajustes)")
                 }
             }

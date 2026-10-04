@@ -16,6 +16,7 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
     static let shared = Notifier()
 
     var onOpen: ((_ slug: String, _ path: String) -> Void)?
+    var onOpenDocked: ((_ slug: String, _ repo: String?) -> Void)?
 
     private var center: UNUserNotificationCenter? {
         Bundle.main.bundleIdentifier == nil ? nil : UNUserNotificationCenter.current()
@@ -49,12 +50,35 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
         center.add(request)
     }
 
+    func postDocked(title: String, waiting: Bool, body: String, slug: String, repo: String?) {
+        guard let center else { return }
+        guard NotificationPreference.isOn(waiting ? NotificationPreference.waiting : NotificationPreference.done) else { return }
+        let content = UNMutableNotificationContent()
+        content.title = title
+        content.subtitle = waiting ? "Aguardando você" : "Agent respondeu"
+        content.body = body
+        if waiting { content.sound = .default }
+        content.userInfo = ["slug": slug, "docked": true, "repo": repo ?? "", "waiting": waiting]
+        content.threadIdentifier = slug
+        center.add(UNNotificationRequest(identifier: "docked-\(slug)-\(repo ?? "")", content: content, trigger: nil))
+    }
+
     nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification) async -> UNNotificationPresentationOptions {
-        await MainActor.run { NSApp.isActive } ? [] : [.banner, .sound]
+        let waiting = notification.request.content.userInfo["waiting"] as? Bool == true
+        return await MainActor.run { NSApp.isActive } && !waiting ? [] : [.banner, .sound]
     }
 
     nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse) async {
         let info = response.notification.request.content.userInfo
+        if info["docked"] as? Bool == true, let slug = info["slug"] as? String {
+            let repo = (info["repo"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+            await MainActor.run {
+                NSApp.activate(ignoringOtherApps: true)
+                NSApp.windows.first(where: { $0.canBecomeMain })?.makeKeyAndOrderFront(nil)
+                onOpenDocked?(slug, repo)
+            }
+            return
+        }
         guard let slug = info["slug"] as? String, let path = info["path"] as? String else { return }
         await MainActor.run {
             NSApp.activate(ignoringOtherApps: true)

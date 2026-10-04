@@ -27,7 +27,7 @@ final class HomeAgentTests: XCTestCase {
 
     @MainActor
     func testSessionUsesHomeInstructionsAndAllowsTramaCommand() {
-        XCTAssertEqual(GeneralAgentSession.role, HomeAgent.instructions)
+        XCTAssertEqual(GeneralAgentSession(path: "/tmp", extraDirs: []).role, HomeAgent.instructions)
         XCTAssertTrue(GeneralAgentSession.allowedTools.contains("Bash(trama *)"))
     }
 
