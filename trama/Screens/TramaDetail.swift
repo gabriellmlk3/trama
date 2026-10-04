@@ -93,6 +93,7 @@ struct TramaHeader: View {
                     if trama.isParked {
                         Chip(text: "estacionada \(relativeTime(trama.parkedAt))", color: Theme.waitText)
                     }
+                    TramaAgentBadge(agent: model.agents(for: trama.slug).first(where: { $0.isRoot }))
                 }
             }
             Spacer(minLength: 12)
@@ -778,6 +779,50 @@ struct PullRequestRow: View {
         case "merged": return Theme.irisText
         case "closed": return Theme.faded
         default: return Theme.text3
+        }
+    }
+}
+
+struct TramaAgentBadge: View {
+    let agent: Agent?
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var pulse = false
+
+    var tone: (fg: Color, bg: Color) {
+        guard let ag = agent else { return (Theme.faded, Theme.line) }
+        if ag.isWaiting { return (Theme.waitText, Theme.wait.opacity(0.14)) }
+        if ag.isWorking { return (Theme.irisText, Theme.iris.opacity(0.14)) }
+        if ag.isDone { return (Theme.okText, Theme.okText.opacity(0.12)) }
+        return (Theme.text3, Theme.line)
+    }
+
+    var icon: String {
+        guard let ag = agent else { return "point.3.connected.trianglepath.dotted" }
+        if ag.isWaiting { return "exclamationmark.circle" }
+        if ag.isDone { return "checkmark.circle" }
+        return "point.3.connected.trianglepath.dotted"
+    }
+
+    var body: some View {
+        if let ag = agent {
+            HStack(spacing: 6) {
+                Image(systemName: icon)
+                    .font(.system(size: 11, weight: .medium))
+                    .opacity(ag.isWorking && pulse ? 0.45 : 1)
+                Text("Agente da trama · \(ag.rootStateLabel)")
+                    .font(.system(size: 12))
+            }
+            .foregroundStyle(tone.fg)
+            .lineLimit(1)
+            .padding(.horizontal, 9)
+            .frame(height: 24)
+            .background(Capsule().fill(tone.bg))
+            .overlay(Capsule().stroke(tone.fg.opacity(0.35), lineWidth: 1))
+            .help(ag.message ?? "Agent da raiz da trama, que coordena todos os repositórios")
+            .onAppear {
+                guard !reduceMotion else { return }
+                withAnimation(.easeInOut(duration: 1.0).repeatForever(autoreverses: true)) { pulse = true }
+            }
         }
     }
 }

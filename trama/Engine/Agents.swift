@@ -23,6 +23,7 @@ public struct Agent: Codable, Hashable, Identifiable, Sendable {
     }
 
     public var id: String { session }
+    public var isRoot: Bool { repo.isEmpty }
     public var isWorking: Bool { state == AgentState.working }
     public var isWaiting: Bool { state == AgentState.waiting }
     public var isDone: Bool { state == AgentState.done }

@@ -98,7 +98,6 @@ struct BaseMenu: View {
 struct BranchThread: View {
     let overview: GitOverview
     let status: RepoStatus
-    var trama: LiveTrama?
     let repo: String
     let worktree: String
     let compare: String?

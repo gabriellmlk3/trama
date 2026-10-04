@@ -204,7 +204,7 @@ struct AgentMenuRow: View {
                 Dot(color: agent.isWaiting ? Theme.wait : (agent.isWorking ? Theme.iris : Theme.faded), halo: agent.isWorking)
             }
             VStack(alignment: .leading, spacing: 1) {
-                Text(agent.repo.isEmpty ? "raiz da trama" : agent.repo)
+                Text(agent.isRoot ? "Agente da trama" : agent.repo)
                     .font(Theme.mono(12))
                     .lineLimit(1)
                 Text(detail)
@@ -239,7 +239,7 @@ struct AgentMenuRow: View {
     }
 
     var detail: String {
-        var parts = [agent.stateLabel]
+        var parts = [agent.isRoot ? agent.rootStateLabel : agent.stateLabel]
         if let m = agent.message, !m.isEmpty, !agent.isWaiting { parts.append(m) }
         parts.append(relativeTime(agent.updatedAt))
         return parts.joined(separator: " · ")

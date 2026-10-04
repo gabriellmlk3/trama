@@ -11,6 +11,17 @@ extension Agent {
     }
 }
 
+extension Agent {
+    var rootStateLabel: String {
+        switch state {
+        case AgentState.working: return "coordenando"
+        case AgentState.waiting: return "precisa de você"
+        case AgentState.done: return "terminou · sua vez"
+        default: return "aberto"
+        }
+    }
+}
+
 extension Finding {
     var typeLabel: String {
         switch type {

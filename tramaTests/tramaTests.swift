@@ -913,6 +913,16 @@ final class FlowTests: XCTestCase {
         XCTAssertThrowsError(try w.mergeBranch(repo: "api", ref: "nao-existe", into: wt))
     }
 
+    func testAgentAtTramaRootIsRoot() throws {
+        let w = try lab.workspace()
+        let (t, _) = try w.newTrama(NewTramaOptions(title: "Agent raiz", repos: ["api"], noFetch: true))
+        try w.handleHook(HookInput(session: "raiz", event: "UserPromptSubmit", cwd: w.tramaPath(t.slug), userPrompt: "coordene"))
+        try w.handleHook(HookInput(session: "repo", event: "UserPromptSubmit", cwd: w.worktreePath(t.slug, "rebocs_api"), userPrompt: "edite"))
+        let agents = try w.agents()
+        XCTAssertTrue(try XCTUnwrap(agents.first { $0.session == "raiz" }).isRoot)
+        XCTAssertFalse(try XCTUnwrap(agents.first { $0.session == "repo" }).isRoot)
+    }
+
     func testEditorIsResolvedInsideTheWorktree() throws {
         let w = try lab.workspace()
         let (t, _) = try w.newTrama(NewTramaOptions(title: "Editor", repos: ["api"], noFetch: true))
