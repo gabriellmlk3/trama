@@ -35,12 +35,14 @@ struct TramaDetailView: View {
                         CapsuleComposer(trama: trama)
                     case .git:
                         GitView(trama: trama, refreshToken: refreshToken, refreshing: $refreshing)
+                    case .agent:
+                        GeneralAgentView(session: model.generalAgent(for: trama))
                     }
                 }
                 .padding(.leading, 28)
                 .padding(.trailing, 28)
                 .padding(.top, 20)
-                .padding(.bottom, mode.wrappedValue == .git ? 0 : 22)
+                .padding(.bottom, mode.wrappedValue == .loom ? 22 : 0)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                 .padding(.trailing, capsuleVisible ? 373 : 0)
                 HStack(spacing: 0) {

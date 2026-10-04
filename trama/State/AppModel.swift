@@ -28,6 +28,7 @@ final class AppModel: ObservableObject {
     @Published var resuming: LiveTrama?
 
     let terminals = TerminalStore()
+    private var generalAgents: [String: GeneralAgentSession] = [:]
 
     private var loop: Task<Void, Never>?
     private var refreshing = false
@@ -466,6 +467,13 @@ final class AppModel: ObservableObject {
             return
         }
         if ok { await refreshFindings() }
+    }
+
+    func generalAgent(for t: LiveTrama) -> GeneralAgentSession {
+        if let existing = generalAgents[t.slug] { return existing }
+        let session = GeneralAgentSession(path: t.path, extraDirs: t.repos.map { worktreePath(t, $0) })
+        generalAgents[t.slug] = session
+        return session
     }
 
     func openClaudeInAll(_ t: LiveTrama, target: ClaudeTarget = .current, scope: AgentScope = .current) {

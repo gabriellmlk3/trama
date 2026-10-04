@@ -4,6 +4,7 @@ import SwiftUI
 enum DetailMode: String, CaseIterable, Identifiable {
     case loom = "Tear"
     case git = "Git"
+    case agent = "Agent"
 
     var id: String { rawValue }
 
@@ -11,6 +12,7 @@ enum DetailMode: String, CaseIterable, Identifiable {
         switch self {
         case .loom: return "repositórios × tramas · cada ponto é um worktree vivo"
         case .git: return "onde cada worktree está, em qual branch e o que mudou"
+        case .agent: return "conversa com o agent geral da trama · visual nativo"
         }
     }
 }
