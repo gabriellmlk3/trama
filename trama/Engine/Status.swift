@@ -4,6 +4,37 @@ public struct Commit: Codable, Hashable, Sendable {
     public var hash: String
     public var subject: String
     public var timestamp: Int64
+    public var parents = 1
+
+    public var isMerge: Bool { parents > 1 }
+
+    public var mergedName: String? {
+        guard isMerge else { return nil }
+        if let open = subject.firstIndex(of: "'") {
+            let rest = subject[subject.index(after: open)...]
+            if let close = rest.firstIndex(of: "'") { return String(rest[..<close]) }
+        }
+        if let range = subject.range(of: " from ") {
+            let name = subject[range.upperBound...].split(separator: " ").first
+            return name.map(String.init)
+        }
+        return nil
+    }
+
+    public init(hash: String, subject: String, timestamp: Int64, parents: Int = 1) {
+        self.hash = hash
+        self.subject = subject
+        self.timestamp = timestamp
+        self.parents = parents
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        hash = try c.decode(String.self, forKey: .hash)
+        subject = try c.decode(String.self, forKey: .subject)
+        timestamp = try c.decode(Int64.self, forKey: .timestamp)
+        parents = try c.decodeIfPresent(Int.self, forKey: .parents) ?? 1
+    }
 }
 
 public struct RepoStatus: Codable, Hashable, Identifiable, Sendable {

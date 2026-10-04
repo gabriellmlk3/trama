@@ -143,10 +143,10 @@ enum Git {
     }
 
     static func lastCommit(_ dir: String) -> Commit? {
-        guard let out = try? run(dir, "log", "-1", "--format=%h%x1f%s%x1f%ct"), !out.isEmpty else { return nil }
+        guard let out = try? run(dir, "log", "-1", "--format=%h%x1f%s%x1f%ct%x1f%P"), !out.isEmpty else { return nil }
         let p = out.components(separatedBy: "\u{1f}")
-        guard p.count == 3 else { return nil }
-        return Commit(hash: p[0], subject: p[1], timestamp: Int64(p[2]) ?? 0)
+        guard p.count == 4 else { return nil }
+        return Commit(hash: p[0], subject: p[1], timestamp: Int64(p[2]) ?? 0, parents: max(1, p[3].split(separator: " ").count))
     }
 
     static func predictedConflict(_ dir: String, _ ref: String) -> String {

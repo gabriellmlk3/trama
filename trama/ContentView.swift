@@ -45,7 +45,10 @@ struct ContentView: View {
         .overlay(alignment: .bottom) {
             Banners()
         }
-        .onAppear { model.start() }
+        .onAppear {
+            model.start()
+            RateLimitStore.shared.startPolling()
+        }
     }
 }
 

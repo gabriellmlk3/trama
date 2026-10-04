@@ -65,6 +65,8 @@ struct Sidebar: View {
                 ContextItem()
             }
 
+            RateLimitsItem()
+
             HStack(spacing: 10) {
                 Image(systemName: "folder")
                     .font(.system(size: 12))
@@ -90,6 +92,77 @@ struct Sidebar: View {
         .padding(.bottom, 12)
         .frame(maxHeight: .infinity, alignment: .top)
         .background(Theme.panel)
+    }
+}
+
+struct RateLimitsItem: View {
+    @ObservedObject private var store = RateLimitStore.shared
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text("Limites do Claude")
+                    .font(Theme.mono(10.5))
+                Spacer()
+                if store.refreshing {
+                    ProgressView().controlSize(.mini)
+                } else {
+                    Button {
+                        Task { await store.refresh() }
+                    } label: {
+                        Image(systemName: "arrow.clockwise").font(.system(size: 10))
+                    }
+                    .buttonStyle(.plain)
+                    .help("Ler os limites agora")
+                }
+            }
+            .foregroundStyle(Theme.faded)
+            if let limits = store.limits, !limits.windows.isEmpty {
+                ForEach(limits.windows, id: \.id) { window in
+                    RateLimitRow(window: window, blocked: limits.isBlocked)
+                }
+            }
+        }
+        .padding(.horizontal, 8)
+        .help(store.limits.map { "Limites do plano do Claude, lidos a cada 15 minutos e a cada resposta de um agent. Última leitura: \($0.updatedAt.formatted(date: .omitted, time: .shortened))." } ?? "Limites do plano do Claude: ainda sem leitura.")
+    }
+}
+
+struct RateLimitRow: View {
+    let window: RateLimitWindow
+    let blocked: Bool
+
+    private var fraction: Double {
+        min(1, max(0, window.utilization > 1 ? window.utilization / 100 : window.utilization))
+    }
+
+    private var color: Color {
+        blocked || fraction > 0.9 ? Theme.waitText : fraction > 0.7 ? Theme.wait : Theme.ember
+    }
+
+    private var reset: String {
+        guard window.resetsAt > Date() else { return "reiniciou" }
+        let sameDay = Calendar.current.isDateInToday(window.resetsAt)
+        return "reinicia " + window.resetsAt.formatted(sameDay ? .dateTime.hour().minute() : .dateTime.weekday(.abbreviated).hour().minute())
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            HStack {
+                Text("\(window.label) · \(Int((fraction * 100).rounded()))%")
+                Spacer()
+                Text(reset)
+            }
+            .font(Theme.mono(10.5))
+            .foregroundStyle(blocked || fraction > 0.9 ? Theme.waitText : Theme.faded)
+            GeometryReader { proxy in
+                ZStack(alignment: .leading) {
+                    Capsule().fill(Theme.line2)
+                    Capsule().fill(color).frame(width: proxy.size.width * fraction)
+                }
+            }
+            .frame(height: 3)
+        }
     }
 }
 

@@ -35,7 +35,11 @@ final class GeneralAgentSession: ObservableObject {
         self.grants = grants
         if let resume {
             conversation.addHistory(ClaudeSessions.transcript(id: resume, at: path))
+            conversation.restoreContext(ClaudeSessions.contextTokens(id: resume, at: path))
             conversation.addNotice("Conversa retomada · as mensagens acima vêm do histórico.")
+            if conversation.contextFraction > 0.8 {
+                conversation.addNotice("O contexto já está em \(Int(conversation.contextFraction * 100))%. Use Compactar antes de continuar.")
+            }
         }
     }
 
@@ -116,7 +120,7 @@ final class GeneralAgentSession: ObservableObject {
         continueAfterDecision()
     }
 
-    var canCompact: Bool { !running && conversation.sessionID != nil && conversation.contextTokens > 0 }
+    var canCompact: Bool { !running && (conversation.sessionID ?? resumeID) != nil && conversation.contextTokens > 0 }
 
     func compact() {
         guard canCompact else { return }
@@ -163,6 +167,7 @@ final class GeneralAgentSession: ObservableObject {
         guard turn == self.turn else { return }
         for event in parser.parse(line) {
             conversation.apply(event)
+            if case .rateLimits(let limits) = event { RateLimitStore.shared.update(limits) }
             if case .finished(let result) = event {
                 var seen = Set<AgentDenial>()
                 pendingPermissions = result.denials.filter { seen.insert($0).inserted }

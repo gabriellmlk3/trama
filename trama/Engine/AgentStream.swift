@@ -61,7 +61,43 @@ enum AgentCLI {
     }
 }
 
+struct RateLimitWindow: Equatable, Codable {
+    var id: String
+    var utilization: Double
+    var resetsAt: Date
+
+    var label: String {
+        switch id {
+        case "five_hour": return "5h"
+        case "seven_day": return "Semana"
+        default: return id
+        }
+    }
+}
+
+struct RateLimits: Equatable, Codable {
+    var status: String
+    var windows: [RateLimitWindow]
+    var updatedAt: Date
+
+    var isBlocked: Bool { status != "allowed" && status != "allowed_warning" }
+
+    static func parse(_ info: [String: Any], now: Date = Date()) -> RateLimits? {
+        guard let status = info["status"] as? String else { return nil }
+        let raw = info["unifiedWindows"] as? [String: Any] ?? [:]
+        let order = ["five_hour": 0, "seven_day": 1]
+        let windows: [RateLimitWindow] = raw.compactMap { id, value in
+            guard let window = value as? [String: Any],
+                  let used = (window["utilization"] as? NSNumber)?.doubleValue,
+                  let reset = (window["resetsAt"] as? NSNumber)?.doubleValue else { return nil }
+            return RateLimitWindow(id: id, utilization: used, resetsAt: Date(timeIntervalSince1970: reset))
+        }.sorted { (order[$0.id] ?? 9, $0.id) < (order[$1.id] ?? 9, $1.id) }
+        return RateLimits(status: status, windows: windows, updatedAt: now)
+    }
+}
+
 enum AgentEvent: Equatable {
+    case rateLimits(RateLimits)
     case started(sessionID: String, model: String)
     case textDelta(messageID: String, text: String)
     case message(id: String, blocks: [AgentBlock])
@@ -97,6 +133,9 @@ struct AgentStreamParser {
             return parseAssistant(object["message"] as? [String: Any] ?? [:])
         case "user":
             return parseUser(object["message"] as? [String: Any] ?? [:])
+        case "rate_limit_event":
+            guard let info = object["rate_limit_info"] as? [String: Any], let limits = RateLimits.parse(info) else { return [] }
+            return [.rateLimits(limits)]
         case "result":
             return [.finished(parseResult(object))]
         default:
@@ -230,6 +269,10 @@ struct AgentConversation: Equatable {
         for turn in turns { append(turn.isUser ? .user : .assistant, turn.text) }
     }
 
+    mutating func restoreContext(_ tokens: Int) {
+        contextTokens = tokens
+    }
+
     mutating func addNotice(_ text: String) {
         append(.notice, text)
     }
@@ -259,6 +302,8 @@ struct AgentConversation: Equatable {
             guard let index = items.firstIndex(where: { $0.toolUseID == toolUseID }) else { return }
             items[index].result = text
             items[index].resultIsError = isError
+        case .rateLimits:
+            break
         case .context(let tokens):
             contextTokens = tokens
         case .compacted(let tokens):

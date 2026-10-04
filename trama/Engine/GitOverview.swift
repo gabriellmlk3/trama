@@ -115,11 +115,11 @@ enum DiffParser {
 
 extension Git {
     static func commits(_ dir: String, _ range: String, limit: Int = 40) -> [Commit] {
-        guard let out = try? run(dir, "log", "-\(limit)", "--format=%h%x1f%s%x1f%ct", range), !out.isEmpty else { return [] }
+        guard let out = try? run(dir, "log", "-\(limit)", "--format=%h%x1f%s%x1f%ct%x1f%P", range), !out.isEmpty else { return [] }
         return out.split(separator: "\n").compactMap { line in
             let p = line.components(separatedBy: "\u{1f}")
-            guard p.count == 3 else { return nil }
-            return Commit(hash: p[0], subject: p[1], timestamp: Int64(p[2]) ?? 0)
+            guard p.count == 4 else { return nil }
+            return Commit(hash: p[0], subject: p[1], timestamp: Int64(p[2]) ?? 0, parents: max(1, p[3].split(separator: " ").count))
         }
     }
 

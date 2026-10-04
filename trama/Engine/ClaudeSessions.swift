@@ -85,6 +85,22 @@ public enum ClaudeSessions {
         return Array(turns.suffix(limit))
     }
 
+    public static func contextTokens(id: String, at path: String, home: String = Paths.home) -> Int {
+        guard let file = conversationFiles(at: path, home: home).first(where: { $0.id == id }),
+              let text = try? String(contentsOfFile: file.path, encoding: .utf8) else { return 0 }
+        var tokens = 0
+        for line in text.split(separator: "\n") where line.contains("\"usage\"") {
+            guard let object = try? JSONSerialization.jsonObject(with: Data(line.utf8)) as? [String: Any],
+                  object["type"] as? String == "assistant",
+                  object["isSidechain"] as? Bool != true,
+                  let usage = (object["message"] as? [String: Any])?["usage"] as? [String: Any] else { continue }
+            let keys = ["input_tokens", "cache_creation_input_tokens", "cache_read_input_tokens", "output_tokens"]
+            let total = keys.reduce(0) { $0 + (usage[$1] as? Int ?? 0) }
+            if total > 0 { tokens = total }
+        }
+        return tokens
+    }
+
     private struct ConversationFile {
         var id: String
         var path: String
