@@ -753,7 +753,7 @@ extension CLI {
         let list = try w.agents()
         if c.json { return try c.emitJSON(list) }
         guard !list.isEmpty else { return c.line("Nenhum agente rodando em tramas agora.") }
-        c.text(table(list.map { [$0.trama, $0.repo, describe($0), relativeTime($0.updatedAt)] }))
+        c.text(table(list.map { [$0.isHome ? "(geral)" : $0.trama, $0.repo, describe($0), relativeTime($0.updatedAt)] }))
     }
 
 

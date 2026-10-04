@@ -1,6 +1,15 @@
 import Foundation
 
 public enum HomeAgent {
+    public static func command(prompt: String, stateDir: String) throws -> String {
+        let file = Paths.join(stateDir, "prompts", UUID().uuidString + ".md")
+        try File.write(prompt, to: file)
+        let quoted = "'" + file.replacingOccurrences(of: "'", with: "'\\''") + "'"
+        return "claude \"$(cat \(quoted); rm -f \(quoted))\""
+    }
+
+    public static let terminalTitle = "agent geral · claude"
+
     public static func prompt(request: String, executable: String) -> String {
         let trama = AgentSkill.command(executable)
         let text = request.split(whereSeparator: \.isWhitespace).joined(separator: " ")

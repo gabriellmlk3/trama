@@ -24,6 +24,7 @@ public struct Agent: Codable, Hashable, Identifiable, Sendable {
 
     public var id: String { session }
     public var isRoot: Bool { repo.isEmpty }
+    public var isHome: Bool { trama.isEmpty }
     public var isWorking: Bool { state == AgentState.working }
     public var isWaiting: Bool { state == AgentState.waiting }
     public var isDone: Bool { state == AgentState.done }
@@ -116,19 +117,22 @@ extension Workspace {
     @discardableResult
     public func handleHook(_ input: HookInput, now: Date = Date()) throws -> String {
         guard let session = input.sessionID, !session.isEmpty,
-              let cwd = input.cwd, !cwd.isEmpty,
-              let place = try? locate(cwd) else {
+              let cwd = input.cwd, !cwd.isEmpty else {
             return ""
         }
-        let (t, r) = place
+        let place = try? locate(cwd)
+        let isHome = place == nil && Paths.real(Paths.absolute(cwd)) == Paths.real(root)
+        guard place != nil || isHome else { return "" }
+        let t = place?.trama
+        let r = place?.repo
         let event = input.hookEventName ?? ""
         if event == "SessionEnd" {
             try? FileManager.default.removeItem(atPath: agentPath(session))
             return ""
         }
         let unix = Int64(now.timeIntervalSince1970)
-        var a = readAgent(session) ?? Agent(session: session, trama: t.slug, repo: "", cwd: cwd, state: AgentState.open, startedAt: unix, updatedAt: unix)
-        a.trama = t.slug
+        var a = readAgent(session) ?? Agent(session: session, trama: t?.slug ?? "", repo: "", cwd: cwd, state: AgentState.open, startedAt: unix, updatedAt: unix)
+        a.trama = t?.slug ?? ""
         a.cwd = cwd
         a.repo = r?.name ?? ""
         a.updatedAt = unix
@@ -136,7 +140,7 @@ extension Workspace {
         switch event {
         case "SessionStart":
             if a.state.isEmpty { a.state = AgentState.open }
-            out = sessionContext(t, r)
+            if let t { out = sessionContext(t, r) }
         case "UserPromptSubmit":
             a.state = AgentState.working
             a.message = truncate(firstLine(input.userPrompt ?? input.prompt ?? ""), 110)

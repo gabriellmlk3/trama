@@ -112,6 +112,47 @@ struct HomeAgentBar: View {
     }
 }
 
+struct HomeAgentPulse: View {
+    @EnvironmentObject var model: AppModel
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        HomeAgentPulseDot(state: model.homeAgent?.state, reduceMotion: reduceMotion)
+    }
+}
+
+struct HomeAgentPulseDot: View {
+    let state: String?
+    let reduceMotion: Bool
+
+    private var working: Bool { state == AgentState.working }
+    private var waiting: Bool { state == AgentState.waiting }
+    private var color: Color { working ? Theme.iris : waiting ? Theme.wait : Theme.ember }
+    private var help: String {
+        working ? "O agent geral está trabalhando" : waiting ? "O agent geral espera por você" : "Agent geral"
+    }
+
+    var body: some View {
+        TimelineView(.animation(minimumInterval: 1.0 / 30, paused: reduceMotion || !(working || waiting))) { context in
+            let t = reduceMotion ? 0 : context.date.timeIntervalSinceReferenceDate
+            let beat = (sin(t * (working ? 5 : 1.8)) + 1) / 2
+            let animated = (working || waiting) && !reduceMotion
+            ZStack {
+                Circle()
+                    .stroke(color.opacity(animated ? 0.5 * (1 - beat) : 0), lineWidth: 1.5)
+                    .frame(width: 12 + 10 * CGFloat(beat), height: 12 + 10 * CGFloat(beat))
+                Image(systemName: "sparkle")
+                    .font(.system(size: 13))
+                    .foregroundStyle(color)
+                    .opacity(animated ? 0.65 + 0.35 * beat : 1)
+                    .scaleEffect(animated ? 1 + 0.12 * CGFloat(beat) : 1)
+            }
+            .frame(width: 22, height: 22)
+        }
+        .help(help)
+    }
+}
+
 struct HomeAgentBox: View {
     @EnvironmentObject var model: AppModel
     @State private var text = ""
@@ -120,9 +161,7 @@ struct HomeAgentBox: View {
 
     var body: some View {
         HStack(spacing: 10) {
-            Image(systemName: "sparkle")
-                .font(.system(size: 13))
-                .foregroundStyle(Theme.ember)
+            HomeAgentPulse()
             TextField("Descreva o que precisa mudar e o agent propõe a trama", text: $text)
                 .textFieldStyle(.plain)
                 .font(.system(size: 13.5))

@@ -101,7 +101,7 @@ final class AppModel: ObservableObject {
             let agent = transition.agent
             let live = new.tramas.first(where: { $0.slug == agent.trama })
             let path = live?.status(for: agent.repo)?.path ?? agent.cwd
-            Notifier.shared.post(transition, tramaTitle: live?.title ?? agent.trama, path: path)
+            Notifier.shared.post(transition, tramaTitle: agent.isHome ? "Agent geral" : live?.title ?? agent.trama, path: path)
         }
     }
 
@@ -237,7 +237,8 @@ final class AppModel: ObservableObject {
     var active: [LiveTrama] { visibleTramas.filter { $0.isActive } }
     var parked: [LiveTrama] { visibleTramas.filter { $0.isParked } }
     var repos: [RepoConfig] { state?.repos ?? [] }
-    var activeAgents: [Agent] { state?.agents ?? [] }
+    var activeAgents: [Agent] { (state?.agents ?? []).filter { !$0.isHome } }
+    var homeAgent: Agent? { state?.agents.first { $0.isHome } }
 
     var selectedTrama: LiveTrama? {
         guard case .trama(let slug)? = screen else { return nil }
@@ -508,8 +509,14 @@ final class AppModel: ObservableObject {
             showError("não encontrei o executável do app")
             return
         }
-        let command = "claude " + shellQuoted(HomeAgent.prompt(request: text, executable: exe))
-        terminals.open(path: root, command: command, title: "agent geral · claude", blocks: false)
+        let command: String
+        do {
+            command = try HomeAgent.command(prompt: HomeAgent.prompt(request: text, executable: exe), stateDir: Paths.join(root, ".trama"))
+        } catch {
+            showError(errorMessage(error))
+            return
+        }
+        terminals.open(path: root, command: command, title: HomeAgent.terminalTitle, blocks: false)
     }
 
     func openClaude(path: String, title: String, resume: ClaudeResume) {
