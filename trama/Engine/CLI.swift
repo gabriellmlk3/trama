@@ -193,7 +193,7 @@ public struct CLI {
     ]
 
     static let order = [
-        "init", "repo", "nova", "ls", "status", "puxar", "soltar", "preparar", "subir", "descer", "pr", "mesclar", "merge", "estacionar", "retomar", "arquivar", "remover", "caminho", "onde",
+        "init", "repo", "nova", "ls", "status", "puxar", "soltar", "preparar", "subir", "descer", "pr", "mesclar", "merge", "estacionar", "retomar", "arquivar", "remover", "caminho", "onde", "vscode",
         "capsula", "contexto", "objetivo", "decisao", "handoff", "recebido", "pendencia", "feito", "nota", "sincronizar",
         "achados", "adotar", "limpar", "buscar", "agentes", "hooks", "hook", "ferramentas", "estado", "versao",
     ]

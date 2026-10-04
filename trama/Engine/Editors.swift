@@ -37,6 +37,26 @@ enum EditorDetection {
         return ["Cursor", "Visual Studio Code"].first(where: isInstalled)
     }
 
+    static let codeApps = ["Visual Studio Code", "Cursor"]
+
+    static func detectCode() -> String? {
+        codeApps.first(where: isInstalled)
+    }
+
+    static func launch(_ path: String, app: String) throws {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/open")
+        process.arguments = ["-a", app, path]
+        let error = Pipe()
+        process.standardError = error
+        try process.run()
+        process.waitUntilExit()
+        if process.terminationStatus != 0 {
+            let message = String(decoding: error.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+            throw TramaError("não consegui abrir \(app): \(message.trimmingCharacters(in: .whitespacesAndNewlines))")
+        }
+    }
+
     static func target(_ dir: String, editor: String) -> String {
         if editor == "Xcode", let t = xcodeTarget(dir) { return t }
         if editor == "Xcode", Paths.exists(Paths.join(dir, "Package.swift")) { return Paths.join(dir, "Package.swift") }
@@ -63,5 +83,37 @@ extension Workspace {
         r.editor = value?.isEmpty == false ? value : nil
         try replaceRepo(r)
         return r
+    }
+}
+
+extension Workspace {
+    public func codeWorkspacePath(_ slug: String) -> String {
+        Paths.join(tramaPath(slug), slug + ".code-workspace")
+    }
+
+    @discardableResult
+    public func writeCodeWorkspace(_ slug: String) throws -> String {
+        let t = try trama(slug)
+        var folders: [[String: String]] = []
+        for key in t.repos {
+            guard let r = try? repo(key), Paths.isDirectory(worktreePath(t.slug, r.name)) else { continue }
+            folders.append(["name": r.alias, "path": r.name])
+        }
+        guard !folders.isEmpty else { throw TramaError("nenhum worktree de \(t.title) encontrado") }
+        let document: [String: Any] = [
+            "folders": folders,
+            "settings": ["window.title": "\(t.title) · ${rootName}${separator}${activeEditorShort}"],
+        ]
+        let data = try JSONSerialization.data(withJSONObject: document, options: [.prettyPrinted, .sortedKeys])
+        let path = codeWorkspacePath(t.slug)
+        try File.write(data, to: path)
+        return path
+    }
+
+    public func codeWorkspaceLaunch(_ slug: String) throws -> (app: String, path: String) {
+        guard let app = EditorDetection.detectCode() else {
+            throw TramaError("não achei o Visual Studio Code nem o Cursor em /Applications")
+        }
+        return (app, try writeCodeWorkspace(slug))
     }
 }

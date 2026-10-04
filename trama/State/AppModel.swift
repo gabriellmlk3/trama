@@ -41,7 +41,7 @@ final class AppModel: ObservableObject {
             guard let self else { return }
             self.select(slug)
             if !self.terminals.focus(path: path) {
-                self.terminals.open(path: path, command: "claude", title: "\(Paths.name(path)) · claude")
+                self.terminals.open(path: path, command: claudeCommand(path: path), title: "\(Paths.name(path)) · claude", blocks: false)
             }
         }
         Notifier.shared.start()
@@ -247,8 +247,8 @@ final class AppModel: ObservableObject {
     }
 
     func select(_ slug: String) {
+        guard screen != .trama(slug) else { return }
         screen = .trama(slug)
-        if capsule?.trama != slug { capsule = nil }
         Task { await loadCapsule(slug) }
     }
 
@@ -446,11 +446,28 @@ final class AppModel: ObservableObject {
         }
     }
 
+    func claudeCommand(path: String, resume: ClaudeResume = .latest, extraDirs: [String] = []) -> String {
+        var parts = ["claude"]
+        switch resume {
+        case .latest:
+            if ClaudeSessions.hasHistory(at: path) { parts.append("--continue") }
+        case .fresh:
+            break
+        case .conversation(let id):
+            parts += ["--resume", shellQuoted(id)]
+        }
+        parts += extraDirs.flatMap { ["--add-dir", shellQuoted($0)] }
+        return parts.joined(separator: " ")
+    }
+
+    func openClaude(path: String, title: String, resume: ClaudeResume) {
+        terminals.open(path: path, command: claudeCommand(path: path, resume: resume), title: title, blocks: false)
+    }
+
     func openClaude(path: String, repo: String, target: ClaudeTarget = .current, extraDirs: [String] = []) {
         switch target {
         case .cli:
-            let command = (["claude"] + extraDirs.flatMap { ["--add-dir", shellQuoted($0)] }).joined(separator: " ")
-            terminals.open(path: path, command: command, title: "\(repo) · claude")
+            terminals.open(path: path, command: claudeCommand(path: path, extraDirs: extraDirs), title: "\(repo) · claude", blocks: false)
         case .desktop:
             guard let url = ClaudeTarget.desktopURL(folder: path), NSWorkspace.shared.open(url) else {
                 showError("Não consegui abrir o Claude Desktop. Ele está instalado?")
@@ -605,6 +622,15 @@ final class AppModel: ObservableObject {
             } catch {
                 showError("\(name): \(errorMessage(error))")
             }
+        }
+    }
+
+    func openInCode(_ slug: String) async {
+        do {
+            let launch = try await Core.run { try $0.codeWorkspaceLaunch(slug) }
+            try Terminal.open(launch.path, withApp: launch.app)
+        } catch {
+            showError(errorMessage(error))
         }
     }
 

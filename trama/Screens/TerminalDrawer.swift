@@ -1,14 +1,13 @@
-import SwiftTerm
 import SwiftUI
 
 struct TerminalHostView: NSViewRepresentable {
     let session: TerminalSession
 
-    func makeNSView(context: Context) -> LocalProcessTerminalView {
-        session.view
+    func makeNSView(context: Context) -> NSView {
+        session.engine.view
     }
 
-    func updateNSView(_ nsView: LocalProcessTerminalView, context: Context) {}
+    func updateNSView(_ nsView: NSView, context: Context) {}
 }
 
 struct TerminalDrawer: View {
@@ -26,22 +25,8 @@ struct TerminalDrawer: View {
                 }
                 TerminalTabStrip(store: store)
                 if store.expanded, let session = store.selected {
-                    ZStack {
-                        TerminalHostView(session: session)
-                            .id(session.id)
-                        if !session.running {
-                            VStack {
-                                Spacer()
-                                Text("sessão encerrada")
-                                    .font(Theme.mono(11.5))
-                                    .foregroundStyle(Theme.faded)
-                                    .padding(.bottom, 10)
-                            }
-                            .allowsHitTesting(false)
-                        }
-                    }
-                    .frame(height: store.height)
-                    .background(Color.black)
+                    TerminalSessionView(session: session, height: store.height)
+                        .id(session.id)
                 }
             }
         }

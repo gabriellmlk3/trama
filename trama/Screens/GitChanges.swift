@@ -113,12 +113,12 @@ struct ChangesPane: View {
                     diffPane
                 }
             }
-            .confirmationDialog(discarding?.title ?? "", isPresented: Binding(get: { discarding != nil }, set: { if !$0 { discarding = nil } }), presenting: discarding) { request in
-                Button("Descartar", role: .destructive) { confirm(request) }
-                Button("Cancelar", role: .cancel) {}
-            } message: { request in
-                Text(request.message)
-            }
+            .appDialog(
+                { $0.title },
+                item: $discarding,
+                message: { $0.message },
+                actions: { request in [DialogAction("Descartar", role: .destructive) { confirm(request) }] }
+            )
         }
     }
 }

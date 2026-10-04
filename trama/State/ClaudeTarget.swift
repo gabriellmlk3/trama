@@ -29,6 +29,12 @@ enum ClaudeTarget: String, CaseIterable, Identifiable {
     }
 }
 
+enum ClaudeResume: Hashable {
+    case latest
+    case fresh
+    case conversation(String)
+}
+
 enum AgentScope: String, CaseIterable, Identifiable {
     case single
     case perRepo

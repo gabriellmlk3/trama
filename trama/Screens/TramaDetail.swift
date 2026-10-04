@@ -24,9 +24,10 @@ struct TramaDetailView: View {
         VStack(spacing: 0) {
             TramaHeader(trama: trama)
             Rectangle().fill(Theme.line).frame(height: 1)
-            HStack(spacing: 0) {
+            ZStack(alignment: .trailing) {
                 VStack(alignment: .leading, spacing: 14) {
-                    DetailBar(mode: mode, capsuleVisible: $capsuleVisible, refreshing: refreshing) { refreshToken += 1 }
+                    DetailBar(mode: mode, refreshing: refreshing) { refreshToken += 1 }
+                        .padding(.trailing, 44)
                     switch mode.wrappedValue {
                     case .loom:
                         LoomView(selected: trama)
@@ -36,18 +37,34 @@ struct TramaDetailView: View {
                         GitView(trama: trama, refreshToken: refreshToken, refreshing: $refreshing)
                     }
                 }
-                .padding(.horizontal, 28)
+                .padding(.leading, 28)
+                .padding(.trailing, 28)
                 .padding(.top, 20)
                 .padding(.bottom, mode.wrappedValue == .git ? 0 : 22)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-                if capsuleVisible {
+                .padding(.trailing, capsuleVisible ? 373 : 0)
+                HStack(spacing: 0) {
                     Rectangle().fill(Theme.line).frame(width: 1)
                     CapsulePanel(trama: trama)
                         .frame(width: 372)
-                        .transition(.move(edge: .trailing).combined(with: .opacity))
                 }
+                .frame(width: 373)
+                .offset(x: capsuleVisible ? 0 : 373)
+                .allowsHitTesting(capsuleVisible)
+                Button {
+                    capsuleVisible.toggle()
+                } label: {
+                    Image(systemName: "sidebar.right")
+                        .foregroundStyle(capsuleVisible ? Theme.emberText : Theme.text2)
+                }
+                .buttonStyle(IconButton(size: 32))
+                .help(capsuleVisible ? "Ocultar a cápsula" : "Mostrar a cápsula")
+                .accessibilityLabel(capsuleVisible ? "Ocultar a cápsula" : "Mostrar a cápsula")
+                .padding(.top, 20)
+                .padding(.trailing, 28)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
             }
-            .animation(.easeInOut(duration: 0.22), value: capsuleVisible)
+            .animation(.easeOut(duration: 0.22), value: capsuleVisible)
             .clipped()
         }
     }
@@ -98,44 +115,42 @@ struct TramaHeader: View {
             }
             Spacer(minLength: 12)
             HStack(spacing: 8) {
-                Menu {
-                    Button("Mostrar pasta no Finder") { Terminal.reveal(trama.path) }
-                    Button("Copiar nome da branch") { Terminal.copy(trama.branch) }
-                    Button("Abrir todos no editor") { Task { await model.openInEditor(trama.slug, repos: trama.repos) } }
+                AppMenu(width: 300) {
+                    Image(systemName: "ellipsis")
+                        .frame(width: 34, height: 32)
+                        .contentShape(Rectangle())
+                } content: {
+                    MenuAction("Mostrar pasta no Finder") { Terminal.reveal(trama.path) }
+                    MenuAction("Copiar nome da branch") { Terminal.copy(trama.branch) }
+                    MenuAction("Abrir a trama no VS Code") { Task { await model.openInCode(trama.slug) } }
+                    MenuAction("Abrir todos no editor") { Task { await model.openInEditor(trama.slug, repos: trama.repos) } }
                     if trama.context != nil || model.state?.context != nil {
-                        Button("Commitar cápsula no contexto") { Task { await model.sync(trama.slug) } }
+                        MenuAction("Commitar cápsula no contexto") { Task { await model.sync(trama.slug) } }
                     }
-                    Button("Repositório de contexto desta trama…") {
+                    MenuAction("Repositório de contexto desta trama…") {
                         if let folder = Terminal.choosePaths(multiple: false, title: "Repositório de contexto de \(trama.title)").first {
                             Task { await model.setTramaContext(trama.slug, folder) }
                         }
                     }
                     if trama.context != nil {
-                        Button("Usar o contexto padrão") { Task { await model.setTramaContext(trama.slug, nil) } }
+                        MenuAction("Usar o contexto padrão") { Task { await model.setTramaContext(trama.slug, nil) } }
                     }
-                    Divider()
+                    MenuDivider()
                     if trama.isActive {
-                        Menu("Trazer commits de outra trama") {
-                            ForEach(model.visibleTramas.filter { $0.slug != trama.slug }) { other in
+                        SubMenu("Trazer commits de outra trama", disabled: model.visibleTramas.count < 2) {
+                            model.visibleTramas.filter { $0.slug != trama.slug }.map { other in
                                 let shared = trama.repos.filter { other.repos.contains($0) }
-                                Button("\(other.title) · \(shared.isEmpty ? "sem repositório em comum" : model.aliases(shared).joined(separator: ", "))") {
-                                    mergeSource = other
-                                }
-                                .disabled(shared.isEmpty)
+                                return MenuAction(
+                                    "\(other.title) · \(shared.isEmpty ? "sem repositório em comum" : model.aliases(shared).joined(separator: ", "))",
+                                    disabled: shared.isEmpty
+                                ) { mergeSource = other }
                             }
                         }
-                        .disabled(model.visibleTramas.count < 2)
                     }
-                    Button("Arquivar trama…") { confirmingArchive = true }
-                    Button("Remover trama…", role: .destructive) { confirmingRemoval = true }
-                } label: {
-                    Image(systemName: "ellipsis")
-                        .frame(width: 34, height: 32)
-                        .contentShape(Rectangle())
+                    MenuAction("Arquivar trama…") { confirmingArchive = true }
+                    MenuAction("Remover trama…", destructive: true) { confirmingRemoval = true }
                 }
-                .menuStyle(.button)
                 .buttonStyle(.plain)
-                .menuIndicator(.hidden)
                 .frame(width: 34, height: 32)
                 .background(RoundedRectangle(cornerRadius: 8).fill(Theme.surface))
                 .overlay(RoundedRectangle(cornerRadius: 8).stroke(Theme.line2, lineWidth: 1))
@@ -152,14 +167,14 @@ struct TramaHeader: View {
                     Button {
                         pullRequestMode = .pullRequest
                     } label: {
-                        Label(model.hasLivePullRequests(trama) ? "Atualizar PRs" : "Abrir PRs", systemImage: "arrow.triangle.pull")
+                        Label(model.hasLivePullRequests(trama) ? "Atualizar PRs" : "Abrir PRs", systemImage: "arrow.up.right.circle")
                     }
                     .buttonStyle(GhostButton())
                     .help("Escolhe a branch de destino de cada repositório, envia as branches e abre (ou atualiza) os PRs, ligados entre si")
                     Button {
                         pullRequestMode = .merge
                     } label: {
-                        Label("Mesclar direto", systemImage: "arrow.triangle.merge")
+                        Label("Mesclar direto", systemImage: "checkmark.circle")
                     }
                     .buttonStyle(GhostButton())
                     .help("Mescla a branch da trama direto na branch de destino de cada repositório, sem abrir PR")
@@ -176,37 +191,39 @@ struct TramaHeader: View {
         .padding(.horizontal, 28)
         .padding(.top, 26)
         .padding(.bottom, 18)
-        .alert("Trazer “\(mergeSource?.title ?? "")” para cá?", isPresented: Binding(get: { mergeSource != nil }, set: { if !$0 { mergeSource = nil } })) {
-            Button("Fazer merge") {
-                if let source = mergeSource { Task { await model.merge(source, into: trama) } }
-                mergeSource = nil
-            }
-            Button("Mesclar e resolver conflitos") {
-                if let source = mergeSource { Task { await model.merge(source, into: trama, allowConflicts: true) } }
-                mergeSource = nil
-            }
-            Button("Cancelar", role: .cancel) { mergeSource = nil }
-        } message: {
-            if let source = mergeSource {
-                Text("Faz merge da branch \(source.branch) em \(trama.branch), nos repositórios que as duas têm. Se algum worktree daqui tiver mudanças não commitadas ou o merge previr conflito, “Fazer merge” não mescla nada; “Mesclar e resolver conflitos” deixa o merge em andamento na aba Git.")
-            }
-        }
+        .appDialog(
+            "Trazer “\(mergeSource?.title ?? "")” para cá?",
+            isPresented: Binding(get: { mergeSource != nil }, set: { if !$0 { mergeSource = nil } }),
+            message: mergeSource.map { "Faz merge da branch \($0.branch) em \(trama.branch), nos repositórios que as duas têm. Se algum worktree daqui tiver mudanças não commitadas ou o merge previr conflito, “Fazer merge” não mescla nada; “Mesclar e resolver conflitos” deixa o merge em andamento na aba Git." },
+            actions: [
+                DialogAction("Fazer merge") {
+                    if let source = mergeSource { Task { await model.merge(source, into: trama) } }
+                },
+                DialogAction("Mesclar e resolver conflitos") {
+                    if let source = mergeSource { Task { await model.merge(source, into: trama, allowConflicts: true) } }
+                },
+            ]
+        )
         .sheet(item: $pullRequestMode) { mode in
             PullRequestSheet(trama: trama, mode: mode)
         }
-        .confirmationDialog("Remover “\(trama.title)”?", isPresented: $confirmingRemoval) {
-            Button("Remover e manter as branches", role: .destructive) { Task { await model.remove(trama.slug, deleteBranches: false) } }
-            Button("Remover e apagar as branches locais", role: .destructive) { Task { await model.remove(trama.slug, deleteBranches: true) } }
-            Button("Cancelar", role: .cancel) {}
-        } message: {
-            Text("A trama some do Trama e os worktrees são removidos. A cápsula continua no repositório de contexto. Se houver mudanças não commitadas, a remoção é recusada. Apagar as branches \(trama.branch) descarta commits que não estejam em outra branch.")
-        }
-        .alert("Arquivar “\(trama.title)”?", isPresented: $confirmingArchive) {
-            Button("Arquivar", role: .destructive) { Task { await model.archive(trama.slug) } }
-            Button("Cancelar", role: .cancel) {}
-        } message: {
-            Text("Os worktrees são removidos; as branches \(trama.branch) continuam em cada repositório e a cápsula fica guardada. Se houver mudanças não commitadas, o arquivamento é recusado.")
-        }
+        .appDialog(
+            "Remover “\(trama.title)”?",
+            isPresented: $confirmingRemoval,
+            message: "A trama some do Trama e os worktrees são removidos. A cápsula continua no repositório de contexto. Se houver mudanças não commitadas, a remoção é recusada. Apagar as branches \(trama.branch) descarta commits que não estejam em outra branch.",
+            actions: [
+                DialogAction("Remover e manter as branches", role: .destructive) { Task { await model.remove(trama.slug, deleteBranches: false) } },
+                DialogAction("Remover e apagar as branches locais", role: .destructive) { Task { await model.remove(trama.slug, deleteBranches: true) } },
+            ]
+        )
+        .appDialog(
+            "Arquivar “\(trama.title)”?",
+            isPresented: $confirmingArchive,
+            message: "Os worktrees são removidos; as branches \(trama.branch) continuam em cada repositório e a cápsula fica guardada. Se houver mudanças não commitadas, o arquivamento é recusado.",
+            actions: [
+                DialogAction("Arquivar", role: .destructive) { Task { await model.archive(trama.slug) } },
+            ]
+        )
     }
 }
 
@@ -238,7 +255,7 @@ struct LoomView: View {
             }
             .onChange(of: selected.slug) { _ in
                 sweep = 0
-                withAnimation(.linear(duration: min(0.9, 0.06 * Double(repos.count + 1)))) { sweep = 1 }
+                withAnimation(.linear(duration: min(0.4, 0.04 * Double(repos.count + 1)))) { sweep = 1 }
             }
             .scrollIndicators(.automatic)
         }
@@ -321,13 +338,14 @@ struct LoomRow: View {
             VStack(alignment: .leading, spacing: 3) {
                 Text(repo.name)
                     .font(Theme.mono(12.5))
-                    .foregroundStyle(inside ? Theme.text : Theme.text3)
+                    .foregroundStyle(inside ? Theme.text : Theme.faded)
                     .lineLimit(1)
                 Text(repo.summary)
                     .font(.system(size: 11.5))
                     .foregroundStyle(Theme.faded)
                     .lineLimit(1)
             }
+            .opacity(inside ? 1 : 0.55)
             .padding(.leading, 16)
             .padding(.trailing, 8)
             .frame(width: nameWidth, alignment: .leading)
@@ -487,7 +505,11 @@ struct VerticalThread: View {
                 ThreadFill(sweep: sweep, rank: rank, total: total)
                     .fill(Theme.ember)
                     .frame(width: 2)
-                    .shadow(color: Theme.ember.opacity(0.5), radius: 6)
+                    .background(
+                        ThreadFill(sweep: sweep, rank: rank, total: total)
+                            .fill(Theme.ember.opacity(0.18))
+                            .frame(width: 8)
+                    )
             }
         }
     }
@@ -513,12 +535,13 @@ struct RepoDetail: View {
                 VStack(alignment: .leading, spacing: 6) {
                     Text("Fora desta trama")
                         .font(.system(size: 12.5))
-                        .foregroundStyle(Theme.text3)
+                        .foregroundStyle(Theme.faded)
                     Text("o fio passa por baixo, nada a mudar aqui")
                         .font(.system(size: 12))
                         .foregroundStyle(Theme.faded)
                         .lineLimit(1)
                 }
+                .opacity(0.55)
                 Spacer(minLength: 8)
                 if trama.isActive {
                     Button {
@@ -554,7 +577,8 @@ struct InsideDetail: View {
             HStack(spacing: 6) {
                 if let ag = status.primaryAgent, ag.isWaiting {
                     Button("Revisar") {
-                        model.terminals.open(path: path, command: "claude", title: "\(repo.name) · claude")
+                        let known = ClaudeSessions.conversations(at: path).contains { $0.id == ag.session }
+                        model.openClaude(path: path, title: "\(repo.name) · claude", resume: known ? .conversation(ag.session) : .latest)
                     }
                     .buttonStyle(ToneButton(color: Theme.wait, text: Theme.waitText))
                     .help("O agente está esperando sua aprovação")
@@ -575,28 +599,18 @@ struct InsideDetail: View {
                 .buttonStyle(IconButton())
                 .help("Abrir o worktree de \(repo.name) no editor")
                 .accessibilityLabel("Abrir \(repo.name) no editor")
-                Button {
-                    model.terminals.open(path: path, command: "claude", title: "\(repo.name) · claude")
-                } label: {
-                    Image(systemName: "sparkle")
-                }
-                .buttonStyle(IconButton())
-                .help("Abrir o Claude Code em \(repo.name)")
-                .accessibilityLabel("Abrir o Claude Code em \(repo.name)")
-                Menu {
-                    Button("Mostrar no Finder") { Terminal.reveal(path) }
-                    Button("Copiar caminho") { Terminal.copy(path) }
-                    Divider()
-                    Button("Soltar da trama") { Task { await model.drop(trama.slug, repo.name) } }
-                } label: {
+                ClaudeMenu(path: path, repo: repo.name)
+                AppMenu {
                     Image(systemName: "ellipsis")
                         .frame(width: 30, height: 30)
                         .contentShape(Rectangle())
+                } content: {
+                    MenuAction("Mostrar no Finder") { Terminal.reveal(path) }
+                    MenuAction("Copiar caminho") { Terminal.copy(path) }
+                    MenuDivider()
+                    MenuAction("Soltar da trama") { Task { await model.drop(trama.slug, repo.name) } }
                 }
-                .menuStyle(.button)
                 .buttonStyle(.plain)
-                .menuIndicator(.hidden)
-                .fixedSize()
                 .help("Mais ações")
             }
         }
@@ -1004,14 +1018,7 @@ struct CapsuleComposer: View {
         HStack(spacing: 10) {
             Image(systemName: "sparkle")
                 .foregroundStyle(Theme.iris)
-            Picker("Tipo", selection: $kind) {
-                ForEach(NoteType.allCases) { t in
-                    Text(t.rawValue).tag(t)
-                }
-            }
-            .pickerStyle(.menu)
-            .labelsHidden()
-            .fixedSize()
+            AppPicker(selection: $kind, options: NoteType.allCases.map { ($0.rawValue, $0) }, width: 170)
             TextField("Escreva na cápsula · os agentes leem ao começar", text: $text)
                 .textFieldStyle(.plain)
                 .font(.system(size: 13))
@@ -1041,5 +1048,41 @@ struct CapsuleComposer: View {
         let slug = trama.slug
         text = ""
         Task { await model.annotate(noteKind, t, trama: slug) }
+    }
+}
+
+
+struct ClaudeMenu: View {
+    @EnvironmentObject var model: AppModel
+    let path: String
+    let repo: String
+    @State private var conversations: [ClaudeConversation] = []
+
+    var body: some View {
+        AppMenu(width: 320, primaryAction: { open(.latest) }) {
+            Image(systemName: "sparkle")
+        } content: {
+            MenuAction("Nova conversa") { open(.fresh) }
+            if !conversations.isEmpty {
+                MenuDivider()
+                MenuSection("Retomar")
+                conversations.map { conversation in
+                    MenuAction("\(conversation.title) · \(conversation.modifiedAt.formatted(.relative(presentation: .named)))") {
+                        open(.conversation(conversation.id))
+                    }
+                }
+            }
+        }
+        .buttonStyle(IconButton())
+        .help(conversations.isEmpty ? "Abrir o Claude Code em \(repo)" : "Continuar a última conversa do Claude Code em \(repo) · segure para escolher outra ou começar uma nova")
+        .accessibilityLabel("Abrir o Claude Code em \(repo)")
+        .task(id: model.terminals.sessions.count) {
+            let target = path
+            conversations = await Task.detached { ClaudeSessions.conversations(at: target) }.value
+        }
+    }
+
+    private func open(_ resume: ClaudeResume) {
+        model.openClaude(path: path, title: "\(repo) · claude", resume: resume)
     }
 }

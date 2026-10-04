@@ -43,7 +43,7 @@ struct NewTramaView: View {
             }
 
             VStack(alignment: .leading, spacing: 18) {
-                Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 16) {
+                Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 14) {
                     GridRow {
                         label("Branch")
                         HStack(spacing: 10) {
@@ -57,24 +57,29 @@ struct NewTramaView: View {
                             Text("igual em todos, a partir de")
                                 .font(.system(size: 12))
                                 .foregroundStyle(Theme.faded)
-                            Menu {
-                                Button("padrão de cada repo") { base = "" }
-                                Divider()
-                                ForEach(baseOptions, id: \.self) { b in
-                                    Button(b) { base = b }
+                            AppMenu(width: 260) {
+                                HStack(spacing: 5) {
+                                    Text(base.isEmpty ? "padrão de cada repo" : "origin/\(base)")
+                                        .font(Theme.mono(12))
+                                        .foregroundStyle(base.isEmpty ? Theme.faded : Theme.text)
+                                    Image(systemName: "chevron.up.chevron.down")
+                                        .font(.system(size: 8))
+                                        .foregroundStyle(Theme.faded)
                                 }
-                            } label: {
-                                Text(base.isEmpty ? "padrão de cada repo" : "origin/\(base)")
-                                    .font(Theme.mono(12))
-                                    .foregroundStyle(base.isEmpty ? Theme.faded : Theme.text)
+                                .contentShape(Rectangle())
+                            } content: {
+                                MenuAction("padrão de cada repo", checked: base.isEmpty) { base = "" }
+                                MenuDivider()
+                                baseOptions.map { b in
+                                    MenuAction(b, checked: base == b) { base = b }
+                                }
                             }
-                            .menuStyle(.borderlessButton)
+                            .buttonStyle(.plain)
                             .fixedSize()
                         }
                     }
                     GridRow(alignment: .top) {
                         label("Repositórios")
-                            .padding(.top, 6)
                         RepoPicker(selected: $selected)
                     }
                     GridRow {
@@ -82,23 +87,26 @@ struct NewTramaView: View {
                         TextField("opcional · ex.: CU-482", text: $task)
                             .textFieldStyle(.plain)
                             .font(.system(size: 13))
+                            .inputField()
                     }
                     GridRow(alignment: .top) {
                         label("Objetivo")
-                            .padding(.top, 1)
                         TextField("opcional · vai para a cápsula que os agentes leem", text: $goal, axis: .vertical)
                             .textFieldStyle(.plain)
                             .font(.system(size: 13))
-                            .lineLimit(1...3)
+                            .lineLimit(2...4)
+                            .inputField(minHeight: 58, alignment: .topLeading)
                     }
                     GridRow {
                         label("Contexto")
-                        HStack(spacing: 10) {
+                        HStack(spacing: 8) {
                             Text(contextLabel)
                                 .font(Theme.mono(12))
                                 .foregroundStyle(context == nil ? Theme.faded : Theme.text)
                                 .lineLimit(1)
                                 .truncationMode(.middle)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .inputField()
                             Button("Escolher…") {
                                 if let folder = Terminal.choosePaths(multiple: false, title: "Repositório de contexto desta trama").first {
                                     context = folder
@@ -120,6 +128,7 @@ struct NewTramaView: View {
                         }
                         .toggleStyle(.switch)
                         .tint(Theme.ember)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                     }
                 }
 
@@ -178,7 +187,7 @@ struct NewTramaView: View {
         Text(text)
             .font(.system(size: 12.5))
             .foregroundStyle(Theme.faded)
-            .frame(width: 96, alignment: .leading)
+            .frame(width: 96, height: 30, alignment: .leading)
     }
 
     func weave() {
@@ -248,8 +257,8 @@ struct RepoPicker: View {
                     }
                 }
             }
-            .frame(maxHeight: 190)
-            .fixedSize(horizontal: false, vertical: visible.count <= 5)
+            .frame(maxHeight: 172)
+            .fixedSize(horizontal: false, vertical: visible.count <= 4)
 
             Button {
                 let paths = Terminal.choosePaths(multiple: true, title: "Cadastrar mais repositórios")
@@ -298,24 +307,35 @@ struct RepoPicker: View {
     }
 }
 
+private extension View {
+    func inputField(minHeight: CGFloat = 30, alignment: Alignment = .leading) -> some View {
+        self
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .frame(maxWidth: .infinity, minHeight: minHeight, alignment: alignment)
+            .background(RoundedRectangle(cornerRadius: 8).fill(Theme.surface))
+            .overlay(RoundedRectangle(cornerRadius: 8).stroke(Theme.line2, lineWidth: 1))
+    }
+}
+
 struct StatNumber: View {
     let value: Int
     let label: String
     var color: Color = Theme.text
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
+        HStack(alignment: .firstTextBaseline, spacing: 6) {
             Text("\(value)")
-                .font(Theme.serif(30))
+                .font(Theme.serif(22))
                 .foregroundStyle(color)
             Text(label)
                 .font(.system(size: 12))
                 .foregroundStyle(Theme.faded)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 14)
-        .padding(.vertical, 12)
-        .background(RoundedRectangle(cornerRadius: 11).fill(Theme.panel))
-        .overlay(RoundedRectangle(cornerRadius: 11).stroke(Theme.line, lineWidth: 1))
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(RoundedRectangle(cornerRadius: 9).fill(Theme.panel))
+        .overlay(RoundedRectangle(cornerRadius: 9).stroke(Theme.line, lineWidth: 1))
     }
 }

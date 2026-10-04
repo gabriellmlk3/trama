@@ -1,0 +1,110 @@
+{
+  "name": "trama-vscode",
+  "displayName": "Trama",
+  "description": "As tramas do app Trama dentro do VS Code: repositórios, cápsula, agentes e achados.",
+  "version": "0.1.0",
+  "publisher": "trama",
+  "license": "UNLICENSED",
+  "private": true,
+  "engines": { "vscode": "^1.85.0" },
+  "categories": ["SCM Providers", "Other"],
+  "activationEvents": ["onStartupFinished"],
+  "main": "./out/extension.js",
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        { "id": "trama", "title": "Trama", "icon": "media/trama.svg" }
+      ]
+    },
+    "views": {
+      "trama": [
+        { "id": "trama.tramas", "name": "Tramas" },
+        { "id": "trama.capsule", "name": "Cápsula" },
+        { "id": "trama.findings", "name": "Achados" }
+      ]
+    },
+    "viewsWelcome": [
+      {
+        "view": "trama.tramas",
+        "contents": "Nenhuma trama ativa.\nCrie uma no app Trama ou com `trama nova \"Título\" --repos a,b`.\n[Atualizar](command:trama.refresh)"
+      },
+      {
+        "view": "trama.capsule",
+        "contents": "Esta janela não está dentro de uma trama.\n[Abrir uma trama](command:trama.openTrama)"
+      }
+    ],
+    "commands": [
+      { "command": "trama.refresh", "title": "Atualizar", "category": "Trama", "icon": "$(refresh)" },
+      { "command": "trama.openTrama", "title": "Abrir trama…", "category": "Trama", "icon": "$(folder-opened)" },
+      { "command": "trama.openCapsule", "title": "Abrir a cápsula", "category": "Trama", "icon": "$(book)" },
+      { "command": "trama.addNote", "title": "Escrever no diário…", "category": "Trama" },
+      { "command": "trama.addDecision", "title": "Registrar decisão…", "category": "Trama" },
+      { "command": "trama.addPending", "title": "Acrescentar pendência…", "category": "Trama", "icon": "$(add)" },
+      { "command": "trama.completePending", "title": "Marcar como feita", "category": "Trama", "icon": "$(check)" },
+      { "command": "trama.handoff", "title": "Passar trabalho para outro repositório…", "category": "Trama" },
+      { "command": "trama.park", "title": "Estacionar trama", "category": "Trama" },
+      { "command": "trama.resume", "title": "Retomar trama", "category": "Trama" },
+      { "command": "trama.openPullRequests", "title": "Abrir PRs da trama", "category": "Trama" },
+      { "command": "trama.openRepo", "title": "Mostrar repositório", "category": "Trama" },
+      { "command": "trama.copyCommand", "title": "Copiar comando sugerido", "category": "Trama", "icon": "$(copy)" }
+    ],
+    "menus": {
+      "view/title": [
+        { "command": "trama.openTrama", "when": "view == trama.tramas", "group": "navigation@1" },
+        { "command": "trama.refresh", "when": "view == trama.tramas || view == trama.findings", "group": "navigation@2" },
+        { "command": "trama.addPending", "when": "view == trama.capsule && trama.inTrama", "group": "navigation@1" },
+        { "command": "trama.openCapsule", "when": "view == trama.capsule && trama.inTrama", "group": "navigation@2" }
+      ],
+      "view/item/context": [
+        { "command": "trama.openTrama", "when": "view == trama.tramas && viewItem == trama", "group": "inline" },
+        { "command": "trama.openCapsule", "when": "view == trama.tramas && viewItem =~ /^trama/", "group": "1_open" },
+        { "command": "trama.openPullRequests", "when": "view == trama.tramas && viewItem == trama", "group": "1_open" },
+        { "command": "trama.park", "when": "view == trama.tramas && viewItem == trama", "group": "2_state" },
+        { "command": "trama.resume", "when": "view == trama.tramas && viewItem == trama-parked", "group": "2_state" },
+        { "command": "trama.completePending", "when": "view == trama.capsule && viewItem == pending", "group": "inline" },
+        { "command": "trama.copyCommand", "when": "view == trama.findings && viewItem == finding-command", "group": "inline" }
+      ],
+      "commandPalette": [
+        { "command": "trama.completePending", "when": "false" },
+        { "command": "trama.openRepo", "when": "false" },
+        { "command": "trama.copyCommand", "when": "false" }
+      ]
+    },
+    "configuration": {
+      "title": "Trama",
+      "properties": {
+        "trama.executable": {
+          "type": "string",
+          "default": "",
+          "description": "Caminho do comando `trama`. Vazio: procura no PATH e dentro do app Trama em /Applications."
+        },
+        "trama.home": {
+          "type": "string",
+          "default": "",
+          "description": "Pasta das tramas (TRAMA_HOME). Vazio: a padrão do Trama (~/Tramas)."
+        },
+        "trama.refreshSeconds": {
+          "type": "number",
+          "default": 20,
+          "minimum": 5,
+          "description": "De quanto em quanto tempo atualizar o estado das tramas."
+        },
+        "trama.openInNewWindow": {
+          "type": "boolean",
+          "default": true,
+          "description": "Abrir a trama escolhida em uma nova janela."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "compile": "tsc -p .",
+    "watch": "tsc -watch -p .",
+    "package": "npm run compile && npx --yes @vscode/vsce package --allow-missing-repository"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/vscode": "^1.85.0",
+    "typescript": "^5.4.0"
+  }
+}

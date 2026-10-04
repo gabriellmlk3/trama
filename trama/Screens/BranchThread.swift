@@ -57,16 +57,7 @@ struct BaseMenu: View {
     @State private var branches: [String] = []
 
     var body: some View {
-        Menu {
-            ForEach(branches, id: \.self) { b in
-                Button {
-                    guard b != current else { return }
-                    Task { await model.setBase(trama.slug, base: b) }
-                } label: {
-                    if b == current { Label(b, systemImage: "checkmark") } else { Text(b) }
-                }
-            }
-        } label: {
+        AppMenu(width: 260) {
             HStack(spacing: 5) {
                 Text("a partir de")
                     .foregroundStyle(Theme.faded)
@@ -82,10 +73,15 @@ struct BaseMenu: View {
             .frame(height: 24)
             .background(RoundedRectangle(cornerRadius: 7).fill(Theme.surface))
             .overlay(RoundedRectangle(cornerRadius: 7).stroke(Theme.line2, lineWidth: 1))
+        } content: {
+            branches.map { b in
+                MenuAction(b, checked: b == current) {
+                    guard b != current else { return }
+                    Task { await model.setBase(trama.slug, base: b) }
+                }
+            }
         }
-        .menuStyle(.button)
         .buttonStyle(.plain)
-        .menuIndicator(.hidden)
         .fixedSize()
         .disabled(model.busy)
         .help("Escolher a branch em que esta trama se baseia (vale para todos os repositórios)")
@@ -102,7 +98,6 @@ struct BranchThread: View {
     let worktree: String
     let compare: String?
     let onCompare: (String?) -> Void
-    var trama: LiveTrama?
     @State private var picking = false
 
     @AppStorage(ThreadLayout.storageKey) private var layoutName = ThreadLayout.horizontal.rawValue

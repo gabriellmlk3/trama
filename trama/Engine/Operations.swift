@@ -391,6 +391,7 @@ extension Workspace {
         let dir = tramaPath(t.slug)
         let fm = FileManager.default
         try? fm.removeItem(atPath: Paths.join(dir, "CLAUDE.md"))
+        try? fm.removeItem(atPath: codeWorkspacePath(t.slug))
         if contextPath(t.slug) != nil {
             try? fm.removeItem(atPath: Paths.join(dir, "CAPSULA.md"))
             if (try? fm.contentsOfDirectory(atPath: dir))?.filter({ $0 != ".DS_Store" }).isEmpty == true {
