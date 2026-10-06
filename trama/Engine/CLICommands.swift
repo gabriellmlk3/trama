@@ -27,6 +27,12 @@ extension CLI {
         "abrir": Command(summary: "pede ao app para abrir o Claude Code numa trama", usage: "trama abrir <trama>", valueFlags: [], run: cmdOpen),
         "estacionar": Command(summary: "pausa uma trama (os worktrees ficam intactos)", usage: "trama estacionar [trama]", valueFlags: [], run: cmdPark),
         "retomar": Command(summary: "reativa uma trama, com rebase opcional na base", usage: "trama retomar <trama> [--rebase] [--sem-fetch]", valueFlags: [], run: cmdResume),
+        "focar": Command(summary: "põe uma trama em foco (trocar de trama): as cópias principais que seguem o foco passam a usar os worktrees dela e as automações “ao focar” rodam",
+                         usage: "trama focar [trama]   (sem nome: a trama da pasta atual; fora de uma trama, mostra qual está em foco)\n  trama focar --limpar   (nenhuma em foco: as cópias principais voltam ao que eram)",
+                         valueFlags: [], run: cmdFocus),
+        "automacao": Command(summary: "automações das tramas: comandos ao focar, criar, incluir, estacionar e retomar, e arquivos cujos caminhos seguem a trama",
+                             usage: "trama automacao [ls]\n  trama automacao modelos\n  trama automacao add \"nome\" --quando focar[,desfocar,criar,incluir,estacionar,retomar] --onde worktrees|trama|principal [--repos app,core] --comando \"...\"\n  trama automacao add \"nome\" --caminhos \"arquivo[,outro]\" --onde worktrees|principal [--repos app]\n  trama automacao add --modelo <n> [--repos app] [qualquer opção acima para ajustar]\n  trama automacao rm|ligar|desligar <n>\n  trama automacao rodar <n> [--trama x] [--evento focar]\n\nComando: roda no zsh, com TRAMA_SLUG, TRAMA_DIR, TRAMA_BRANCH, TRAMA_EVENTO, TRAMA_REPOS, TRAMA_NOVOS, TRAMA_REPO e TRAMA_CAMINHO_<REPO> (o worktree, se o repositório está na trama, ou a cópia principal). Na cópia principal, só a trama em foco dispara (além de focar e desfocar).\nCaminhos: nos arquivos indicados (fora do git), todo caminho que aponta para um repositório cadastrado (../repo, a cópia principal ou o worktree de outra trama) passa a apontar para onde ele está na trama. Nos worktrees vale sempre; na cópia principal, enquanto uma trama estiver em foco, e volta para a cópia principal quando nenhuma estiver.",
+                             valueFlags: ["quando", "onde", "repos", "comando", "caminhos", "modelo", "trama", "evento"], run: cmdAutomation),
         "arquivar": Command(summary: "remove os worktrees e arquiva a trama (branches ficam)", usage: "trama arquivar <trama> [--forcar]", valueFlags: [], run: cmdArchive),
         "remover": Command(summary: "remove a trama de vez: worktrees e registro (a cápsula e, por padrão, as branches ficam)", usage: "trama remover <trama> [--forcar] [--branches]", valueFlags: [], run: cmdRemove),
         "subir": Command(summary: "sobe os serviços de desenvolvimento da trama, cada um na sua porta",
@@ -421,6 +427,127 @@ extension CLI {
         for r in results {
             c.line("  \(r.repo): \(r.situation)" + (r.detail.map { " · " + $0 } ?? ""))
         }
+    }
+
+    static func cmdFocus(_ c: Context, _ a: Arguments) throws {
+        let w = try c.open()
+        if a.has("limpar") {
+            let previous = w.focusedTrama()
+            let warnings = try w.clearFocus()
+            if c.json { return try c.emitJSON(["foco": nil as String?]) }
+            c.ok(previous == nil ? "nenhuma trama estava em foco" : "\(previous!.title) saiu do foco · as cópias principais voltaram ao que eram")
+            return c.warnings(warnings)
+        }
+        let explicit = a.positional(0)
+        if explicit == nil && (try? w.locate(c.cli.currentDirectory())) == nil {
+            let current = w.focusedTrama()
+            if c.json { return try c.emitJSON(["foco": current?.slug]) }
+            guard let t = current else { return c.line("Nenhuma trama em foco. Use: trama focar <trama>") }
+            return c.line("\(t.title) (\(t.slug)) está em foco")
+        }
+        let target = try c.targetTrama(w, explicit).trama
+        let (t, warnings) = try w.focus(target.slug)
+        if c.json { return try c.emitJSON(["foco": t.slug]) }
+        c.ok("\(t.title) em foco")
+        for rule in w.config.automations where rule.enabled && rule.followsFocus {
+            c.line("  \(rule.files.joined(separator: ", ")) de \(rule.repos.joined(separator: ", ")) aponta para \(t.slug)")
+        }
+        if w.automationState(t.slug) == AutomationRunState.running {
+            c.line("  automações rodando · log em \(Paths.abbreviate(w.automationLogPath(t.slug)))")
+        }
+        c.warnings(warnings)
+    }
+
+    private struct AutomationListResponse: Encodable {
+        var automacoes: [Automation]
+        var foco: String?
+    }
+
+    private struct TemplateResponse: Encodable {
+        var id: String
+        var stack: String
+        var automacao: Automation
+    }
+
+    static func cmdAutomation(_ c: Context, _ a: Arguments) throws {
+        let w = try c.open()
+        switch a.positional(0) ?? "ls" {
+        case "ls", "lista":
+            if c.json { return try c.emitJSON(AutomationListResponse(automacoes: w.config.automations, foco: w.focusedTrama()?.slug)) }
+            printAutomations(c, w)
+        case "modelos":
+            let templates = AutomationTemplate.all
+            if c.json { return try c.emitJSON(templates.map { TemplateResponse(id: $0.id, stack: $0.stack, automacao: $0.automation) }) }
+            var rows = [["#", "STACK", "MODELO", "QUANDO · ONDE"]]
+            for (i, t) in templates.enumerated() {
+                rows.append(["\(i + 1)", t.stack, t.title, t.automation.summary])
+            }
+            c.text(table(rows))
+            c.line("\nPara usar: trama automacao add --modelo <n> [--repos app]")
+        case "add", "adicionar", "nova":
+            var draft = try a.value("modelo").map { try AutomationTemplate.find($0).instantiate() }
+                ?? Automation(name: "", scope: .worktrees)
+            let name = a.text(from: 1)
+            if !name.isEmpty { draft.name = name }
+            if let files = a.value("caminhos") {
+                draft.kind = .paths
+                draft.files = [files]
+            }
+            if let command = a.value("comando") {
+                guard a.value("caminhos") == nil else { throw TramaError("use --comando ou --caminhos, não os dois") }
+                draft.kind = .command
+                draft.command = command
+            }
+            if let when = a.value("quando") { draft.events = try AutomationEvent.parse(when) }
+            if let place = a.value("onde") { draft.scope = try AutomationScope.parse(place) }
+            if let repos = a.value("repos") { draft.repos = [repos] }
+            if a.value("modelo") == nil && a.value("comando") == nil && a.value("caminhos") == nil {
+                throw TramaError("uso: trama automacao add \"nome\" --quando focar --onde worktrees --comando \"...\" (ou --caminhos arquivo, ou --modelo n)")
+            }
+            let (saved, warnings) = try w.saveAutomation(draft)
+            let n = (w.config.automations.firstIndex { $0.id == saved.id } ?? 0) + 1
+            c.ok("automação \(n) · \(saved.name): \(saved.summary)")
+            c.warnings(warnings)
+        case "rm", "remover":
+            guard let key = a.positional(1) else { throw TramaError("uso: trama automacao rm <n>") }
+            let (removed, warnings) = try w.removeAutomation(key)
+            c.ok("automação “\(removed.name)” removida")
+            c.warnings(warnings)
+        case "ligar", "desligar":
+            guard let key = a.positional(1) else { throw TramaError("uso: trama automacao \(a.positional(0)!) <n>") }
+            let on = a.positional(0) == "ligar"
+            let (saved, warnings) = try w.setAutomationEnabled(key, on)
+            c.ok("“\(saved.name)” \(on ? "ligada" : "desligada")")
+            c.warnings(warnings)
+        case "rodar":
+            guard let key = a.positional(1) else { throw TramaError("uso: trama automacao rodar <n> [--trama x] [--evento focar]") }
+            let target = try c.targetTrama(w, a.value("trama")).trama
+            let event = try a.value("evento").map { try AutomationEvent.parse($0) }?.first
+            let warnings = try w.runAutomation(key, trama: target.slug, event: event)
+            if try w.automation(key).kind == .paths {
+                c.ok("caminhos ajustados em \(target.slug)")
+            } else {
+                c.ok("rodando em \(target.slug) · log em \(Paths.abbreviate(w.automationLogPath(target.slug)))")
+            }
+            c.warnings(warnings)
+        default:
+            throw TramaError("subcomando desconhecido: \(a.positional(0) ?? "") (use ls, modelos, add, rm, ligar, desligar ou rodar)")
+        }
+    }
+
+    private static func printAutomations(_ c: Context, _ w: Workspace) {
+        c.line("Em foco: \(w.focusedTrama().map { "\($0.title) (\($0.slug))" } ?? "nenhuma")")
+        c.line()
+        guard !w.config.automations.isEmpty else {
+            return c.line("Nenhuma automação. Veja exemplos para várias stacks com: trama automacao modelos")
+        }
+        var rows = [["#", "NOME", "QUANDO", "ONDE", "O QUÊ"]]
+        for (i, auto) in w.config.automations.enumerated() {
+            let place = auto.scope.rawValue + (auto.repos.isEmpty ? "" : ": " + auto.repos.joined(separator: ","))
+            let when = auto.kind == .paths ? (auto.followsFocus ? "segue o foco" : "sempre") : auto.events.map(\.rawValue).joined(separator: ",")
+            rows.append(["\(i + 1)", auto.name + (auto.enabled ? "" : " (desligada)"), when, place, auto.action])
+        }
+        c.text(table(rows))
     }
 
     static func cmdArchive(_ c: Context, _ a: Arguments) throws {

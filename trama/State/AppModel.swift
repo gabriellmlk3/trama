@@ -9,6 +9,8 @@ final class AppModel: ObservableObject {
         case home
         case trama(String)
         case findings
+        case automations
+        case repositories
     }
 
     enum NoteKind {
@@ -34,6 +36,7 @@ final class AppModel: ObservableObject {
     private var homeAgentSession: GeneralAgentSession?
 
     private var loop: Task<Void, Never>?
+    let clock = RefreshClock()
     private var refreshing = false
     private var lastFetch = Date.distantPast
     private var knownAgents: [Agent]?
@@ -124,10 +127,15 @@ final class AppModel: ObservableObject {
     }
 
     private func refreshAgents() async {
-        guard state != nil, let agents = try? await Core.run({ try $0.agents() }), agents != hookAgents else { return }
-        state?.agents = agents
-        if let state { notifyTransitions(state) }
-        mergeDockedAgents()
+        guard var current = state, let agents = try? await Core.run({ try $0.agents() }), agents != hookAgents else { return }
+        current.agents = agents
+        notifyTransitions(current)
+        publish(merged(current))
+    }
+
+    private func publish(_ new: OverallState) {
+        if let old = state, old.sameContent(as: new) { return }
+        state = new
     }
 
     private func dockedAgent(key: String, session: GeneralAgentSession) -> Agent {
@@ -147,7 +155,12 @@ final class AppModel: ObservableObject {
     }
 
     private func mergeDockedAgents() {
-        guard var current = state else { return }
+        guard let current = state else { return }
+        publish(merged(current))
+    }
+
+    private func merged(_ base: OverallState) -> OverallState {
+        var current = base
         let docked = tramaAgents.map { dockedAgent(key: $0.key, session: $0.value) }
         let sessions = Set(docked.map(\.session))
         var merged = hookAgents.filter { !sessions.contains($0.session) } + docked
@@ -160,7 +173,7 @@ final class AppModel: ObservableObject {
                 current.tramas[t].status[s].agents = merged.filter { $0.trama == slug && $0.repo == repo }
             }
         }
-        state = current
+        return current
     }
 
     private var hookAgents: [Agent] { knownAgents ?? [] }
@@ -176,10 +189,10 @@ final class AppModel: ObservableObject {
         defer { refreshing = false }
         do {
             let new = try await Core.run { try $0.fullState() }
-            state = new
             notifyTransitions(new)
-            mergeDockedAgents()
-            needsSetup = false
+            publish(merged(new))
+            clock.tick(new.generatedAt)
+            if needsSetup { needsSetup = false }
             if screen == nil { screen = .home }
             if let t = selectedTrama {
                 await loadCapsule(t.slug)
@@ -207,7 +220,8 @@ final class AppModel: ObservableObject {
     func refreshFindings() async {
         guard !needsSetup else { return }
         do {
-            findings = try await Core.run { try $0.findings() }
+            let fresh = try await Core.run { try $0.findings() }
+            if fresh != findings { findings = fresh }
             findingsAt = Date()
         } catch {
             showError(errorMessage(error))
@@ -220,7 +234,7 @@ final class AppModel: ObservableObject {
             return
         }
         let list = tramas.map(\.trama)
-        if let result = try? await Core.run({ w in Dictionary(uniqueKeysWithValues: list.map { ($0.slug, w.pullRequestInfos($0)) }) }) {
+        if let result = try? await Core.run({ w in Dictionary(uniqueKeysWithValues: list.map { ($0.slug, w.pullRequestInfos($0)) }) }), result != pullRequests {
             pullRequests = result
         }
     }
@@ -315,7 +329,7 @@ final class AppModel: ObservableObject {
     }
 
     func loadCapsule(_ slug: String) async {
-        if let c = try? await Core.run({ try $0.readCapsule(slug) }) {
+        if let c = try? await Core.run({ try $0.readCapsule(slug) }), c != capsule {
             capsule = c
         }
     }
@@ -370,8 +384,13 @@ final class AppModel: ObservableObject {
     }
 
     var focusedTrama: LiveTrama? {
+        if let slug = state?.focus, let t = active.first(where: { $0.slug == slug }) { return t }
         if let t = selectedTrama, t.isActive { return t }
         return active.first
+    }
+
+    func isFocused(_ slug: String) -> Bool {
+        state?.focus == slug
     }
 
     func agents(for slug: String) -> [Agent] {
@@ -411,6 +430,31 @@ final class AppModel: ObservableObject {
         }
     }
 
+    private func showWarnings(_ warnings: [Warning]) {
+        guard !warnings.isEmpty else { return }
+        let lines = warnings.map { warning -> String in
+            guard let r = warning.repo else { return warning.message }
+            return "\(r): \(warning.message)"
+        }
+        showError(lines.joined(separator: "\n"))
+    }
+
+    @discardableResult
+    func performReporting(success: String? = nil, _ work: @escaping @Sendable (Workspace) throws -> [Warning]) async -> Bool {
+        busy = true
+        defer { busy = false }
+        do {
+            let warnings = try await Core.run(work)
+            if let success { showNotice(success) }
+            showWarnings(warnings)
+            await refresh()
+            return true
+        } catch {
+            showError(errorMessage(error))
+            return false
+        }
+    }
+
     func newTrama(_ options: NewTramaOptions, openAgents: Bool) async -> Bool {
         busy = true
         defer { busy = false }
@@ -419,13 +463,7 @@ final class AppModel: ObservableObject {
             await refresh()
             select(result.trama.slug)
             showNotice("Trama “\(result.trama.title)” tecida")
-            if !result.warnings.isEmpty {
-                let lines = result.warnings.map { warning -> String in
-                    guard let r = warning.repo else { return warning.message }
-                    return "\(r): \(warning.message)"
-                }
-                showError(lines.joined(separator: "\n"))
-            }
+            showWarnings(result.warnings)
             if openAgents, let live = selectedTrama {
                 openClaudeInAll(live)
             }
@@ -1129,6 +1167,40 @@ final class AppModel: ObservableObject {
 
     func prepare(_ slug: String, _ repo: String) async {
         await perform(success: "Preparando \(repo)…") { _ = try $0.prepare(slug, repo) }
+    }
+
+    func focus(_ slug: String) async {
+        let title = state?.tramas.first(where: { $0.slug == slug })?.title ?? slug
+        await performReporting(success: "“\(title)” em foco") { try $0.focus(slug).warnings }
+    }
+
+    func clearFocus() async {
+        await performReporting(success: "Nenhuma trama em foco · as cópias principais voltaram ao que eram") { try $0.clearFocus() }
+    }
+
+    func saveAutomation(_ automation: Automation) async -> (saved: Automation?, problem: String?) {
+        do {
+            let result = try await Core.run { try $0.saveAutomation(automation) }
+            showWarnings(result.warnings)
+            await refresh()
+            return (result.automation, nil)
+        } catch {
+            return (nil, errorMessage(error))
+        }
+    }
+
+    func runAutomation(_ id: String, trama slug: String) async {
+        let title = state?.tramas.first(where: { $0.slug == slug })?.title ?? slug
+        let name = state?.automations.first(where: { $0.id == id })?.name ?? "automação"
+        await performReporting(success: "“\(name)” rodando em \(title)") { try $0.runAutomation(id, trama: slug) }
+    }
+
+    func removeAutomation(_ id: String) async {
+        await performReporting { try $0.removeAutomation(id).warnings }
+    }
+
+    func setAutomationEnabled(_ id: String, _ enabled: Bool) async {
+        await performReporting { try $0.setAutomationEnabled(id, enabled).warnings }
     }
 
     func removeRepo(_ name: String) async {

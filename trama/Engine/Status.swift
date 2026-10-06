@@ -71,6 +71,8 @@ public struct LiveTrama: Hashable, Identifiable, Encodable, Sendable {
     public var path: String
     public var capsule: String
     public var status: [RepoStatus]
+    public var automation: String?
+    public var automationLog: String?
 
     public var id: String { trama.slug }
 
@@ -117,7 +119,17 @@ public struct OverallState: Encodable, Sendable {
     public var repos: [RepoConfig]
     public var tramas: [LiveTrama]
     public var agents: [Agent]
+    public var focus: String?
+    public var automations: [Automation] = []
     public var generatedAt: Int64
+}
+
+extension OverallState: Equatable {
+    public func sameContent(as other: OverallState) -> Bool {
+        var aligned = other
+        aligned.generatedAt = generatedAt
+        return self == aligned
+    }
 }
 
 extension Workspace {
@@ -192,6 +204,8 @@ extension Workspace {
     public func liveTrama(_ t: Trama, agents: [Agent], predictConflict: Bool = true) -> LiveTrama {
         var v = LiveTrama(trama: t, path: tramaPath(t.slug), capsule: capsulePath(t.slug), status: [])
         guard !t.isArchived else { return v }
+        v.automation = automationState(t.slug)
+        if v.automation != nil { v.automationLog = automationLogPath(t.slug) }
         v.status = tramaStatus(t, predictConflict: predictConflict)
         for i in v.status.indices {
             v.status[i].agents = agents.filter { $0.trama == t.slug && $0.repo == v.status[i].repo }
@@ -217,6 +231,8 @@ extension Workspace {
             repos: config.repos,
             tramas: live.compactMap { $0 }.sorted { $0.trama.createdAt < $1.trama.createdAt },
             agents: ags,
+            focus: focusedTrama()?.slug,
+            automations: config.automations,
             generatedAt: nowUnix()
         )
     }

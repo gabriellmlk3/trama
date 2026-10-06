@@ -186,6 +186,14 @@ func truncate(_ s: String, _ n: Int) -> String {
     return String(t.prefix(n - 1)).trimmingCharacters(in: .whitespaces) + "…"
 }
 
+func runConcurrently(_ work: [() -> Void]) {
+    guard work.count > 1 else {
+        work.first?()
+        return
+    }
+    DispatchQueue.concurrentPerform(iterations: work.count) { work[$0]() }
+}
+
 func firstLine(_ s: String) -> String {
     let t = s.trimmingCharacters(in: .whitespacesAndNewlines)
     if let i = t.firstIndex(of: "\n") {

@@ -190,10 +190,11 @@ public struct CLI {
         "path": "caminho", "where": "onde", "capsule": "capsula", "cápsula": "capsula",
         "decision": "decisao", "decisão": "decisao", "pendência": "pendencia",
         "version": "versao", "--version": "versao", "-v": "versao", "fetch": "buscar",
+        "focus": "focar", "automacoes": "automacao", "automação": "automacao", "automações": "automacao",
     ]
 
     static let order = [
-        "init", "repo", "nova", "ls", "status", "puxar", "soltar", "preparar", "subir", "descer", "pr", "mesclar", "merge", "estacionar", "retomar", "arquivar", "remover", "caminho", "onde", "vscode",
+        "init", "repo", "automacao", "nova", "ls", "status", "focar", "puxar", "soltar", "preparar", "subir", "descer", "pr", "mesclar", "merge", "estacionar", "retomar", "arquivar", "remover", "caminho", "onde", "vscode",
         "capsula", "contexto", "objetivo", "decisao", "handoff", "sugerir", "sugestao", "recebido", "pendencia", "feito", "nota", "sincronizar",
         "achados", "adotar", "limpar", "buscar", "agentes", "hooks", "hook", "ferramentas", "estado", "versao",
     ]

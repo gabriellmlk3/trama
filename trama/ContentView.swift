@@ -4,6 +4,12 @@ import SwiftUI
 struct ContentView: View {
     @EnvironmentObject var model: AppModel
     @Environment(\.openWindow) private var openWindow
+    @AppStorage(SidebarPreference.expanded) private var sidebarExpanded = true
+    @State private var windowControlsInset: CGFloat = 0
+
+    private var sidebarToggleLeading: CGFloat {
+        windowControlsInset > 0 ? windowControlsInset + 10 : SidebarPreference.itemInset
+    }
 
     var body: some View {
         Group {
@@ -12,13 +18,32 @@ struct ContentView: View {
             } else {
                 VStack(spacing: 0) {
                     HStack(spacing: 0) {
-                        Sidebar()
-                            .frame(width: 264)
+                        ZStack(alignment: .leading) {
+                            if sidebarExpanded {
+                                Sidebar()
+                                    .frame(width: SidebarPreference.width)
+                                    .transition(.opacity)
+                            } else {
+                                SidebarRail()
+                                    .frame(width: SidebarPreference.railWidth)
+                                    .transition(.opacity)
+                            }
+                        }
+                        .frame(width: sidebarExpanded ? SidebarPreference.width : SidebarPreference.railWidth, alignment: .leading)
+                        .frame(maxHeight: .infinity)
+                        .clipped()
                         Rectangle().fill(Theme.line).frame(width: 1)
                         DetailView()
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
                     }
                     .frame(maxHeight: .infinity)
+                    .overlay(alignment: .topLeading) {
+                        SidebarToggle(expanded: $sidebarExpanded)
+                            .padding(.leading, sidebarToggleLeading)
+                            .padding(.top, 4)
+                    }
+                    .animation(.spring(response: 0.36, dampingFraction: 0.86), value: sidebarExpanded)
+                    .background(WindowControlsInset(inset: $windowControlsInset))
                     TerminalDrawer(store: model.terminals)
                 }
             }
@@ -61,6 +86,10 @@ struct DetailView: View {
             HomeView()
         case .findings?:
             FindingsView()
+        case .automations?:
+            AutomationsView()
+        case .repositories?:
+            RepositoriesView()
         case .trama?:
             if let t = model.selectedTrama {
                 TramaDetailView(trama: t)

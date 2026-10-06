@@ -59,6 +59,9 @@ struct MenuBarView: View {
                         let current = model.focusedTrama?.slug == t.slug
                         Button {
                             model.select(t.slug)
+                            if !model.isFocused(t.slug) {
+                                Task { await model.focus(t.slug) }
+                            }
                             focusWindow()
                         } label: {
                             HStack(spacing: 10) {

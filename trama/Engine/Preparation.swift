@@ -128,7 +128,25 @@ extension Workspace {
     }
 
     func startPreparation(_ t: Trama, _ r: RepoConfig) -> [Warning] {
-        guard !r.recipe.isEmpty else { return [] }
+        startPreparations(t, [r])
+    }
+
+    func startPreparations(_ t: Trama, _ repos: [RepoConfig], afterCopying: () -> [Warning] = { [] }) -> [Warning] {
+        var warnings: [Warning] = []
+        var pending: [RepoConfig] = []
+        for r in repos where !r.recipe.isEmpty {
+            let begun = beginPreparation(t, r)
+            warnings += begun.warnings
+            if begun.needsRun { pending.append(r) }
+        }
+        warnings += afterCopying()
+        for r in pending {
+            warnings += runPreparation(t, r)
+        }
+        return warnings
+    }
+
+    private func beginPreparation(_ t: Trama, _ r: RepoConfig) -> (needsRun: Bool, warnings: [Warning]) {
         let wt = worktreePath(t.slug, r.name)
         let log = prepLogPath(t.slug, r.name)
         let statePath = prepStatePath(t.slug, r.name)
@@ -137,7 +155,7 @@ extension Workspace {
             try File.write("", to: log)
             try File.write(PrepState.running + "\n", to: statePath)
         } catch {
-            return [Warning(repo: r.name, message: "não consegui preparar o worktree: \(errorMessage(error))")]
+            return (false, [Warning(repo: r.name, message: "não consegui preparar o worktree: \(errorMessage(error))")])
         }
         var header = "# preparo de \(r.name) · \(Timestamp.string())\n"
         let (copied, failures) = copyIgnoredFiles(r, into: wt)
@@ -149,23 +167,28 @@ extension Workspace {
         try? File.write(header, to: log)
         guard !r.run.isEmpty else {
             try? File.write(PrepState.ready + "\n", to: statePath)
-            return warnings
+            return (false, warnings)
         }
+        return (true, warnings)
+    }
+
+    private func runPreparation(_ t: Trama, _ r: RepoConfig) -> [Warning] {
+        let statePath = prepStatePath(t.slug, r.name)
         let script = """
         cd "$TRAMA_WT" && /bin/zsh -ilc "$TRAMA_RECIPE" >> "$TRAMA_LOG" 2>&1
         if [ $? -eq 0 ]; then echo \(PrepState.ready) > "$TRAMA_STATE"; else echo \(PrepState.failed) > "$TRAMA_STATE"; fi
         """
         var env = ProcessInfo.processInfo.environment
-        env["TRAMA_WT"] = wt
-        env["TRAMA_LOG"] = log
+        env["TRAMA_WT"] = worktreePath(t.slug, r.name)
+        env["TRAMA_LOG"] = prepLogPath(t.slug, r.name)
         env["TRAMA_STATE"] = statePath
         env["TRAMA_RECIPE"] = r.run.joined(separator: " && ")
         do {
             try ProcessRunner.spawnDetached("/bin/sh", ["-c", script], environment: env)
+            return []
         } catch {
             try? File.write(PrepState.failed + "\n", to: statePath)
-            warnings.append(Warning(repo: r.name, message: "não consegui rodar o preparo: \(error.localizedDescription)"))
+            return [Warning(repo: r.name, message: "não consegui rodar o preparo: \(error.localizedDescription)")]
         }
-        return warnings
     }
 }

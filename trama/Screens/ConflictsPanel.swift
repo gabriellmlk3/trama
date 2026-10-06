@@ -3,7 +3,6 @@ import SwiftUI
 
 private struct ConflictsKey: Hashable {
     var worktree: String
-    var stamp: Int64
     var version: Int
 }
 
@@ -22,21 +21,24 @@ struct ConflictsPanel: View {
 
     private let collapsedLimit = 8
 
+    func reload() async {
+        let repo = repo
+        let worktree = worktree
+        conflicts = try? await Core.run { try $0.conflictState(repo: repo, worktree: worktree) }
+        if advance {
+            advance = false
+            resolving = conflicts?.files.first(where: \.canMerge)
+        }
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             if let c = conflicts, c.merging || !c.files.isEmpty {
                 card(c)
             }
         }
-        .task(id: ConflictsKey(worktree: worktree, stamp: model.state?.generatedAt ?? 0, version: version)) {
-            let repo = repo
-            let worktree = worktree
-            conflicts = try? await Core.run { try $0.conflictState(repo: repo, worktree: worktree) }
-            if advance {
-                advance = false
-                resolving = conflicts?.files.first(where: \.canMerge)
-            }
-        }
+        .task(id: ConflictsKey(worktree: worktree, version: version)) { await reload() }
+        .onRefresh(model.clock) { await reload() }
         .sheet(item: $resolving) { file in
             ConflictResolver(repo: repo, worktree: worktree, file: file, oursName: conflicts?.current ?? "", theirsName: conflicts?.incoming ?? "") {
                 advance = true

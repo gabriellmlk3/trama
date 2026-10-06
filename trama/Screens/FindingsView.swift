@@ -300,12 +300,13 @@ struct FindingDiffView: View {
                         .font(.system(size: 12.5))
                         .foregroundStyle(Theme.faded)
                 } else {
-                    ViewThatFits(in: .horizontal) {
+                    WidthSwitch {
                         HStack(alignment: .top, spacing: 14) {
                             FileList(changes: r.changes, selectedFile: $selectedFile)
                                 .frame(width: 252)
                             DiffPane(change: selected, lines: diff, path: finding.path ?? "")
                         }
+                    } narrow: {
                         VStack(spacing: 14) {
                             FileList(changes: r.changes, selectedFile: $selectedFile)
                             DiffPane(change: selected, lines: diff, path: finding.path ?? "")

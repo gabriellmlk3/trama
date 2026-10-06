@@ -98,7 +98,7 @@ struct ChangesPane: View {
                 }
             }
         } else {
-            ViewThatFits(in: .horizontal) {
+            WidthSwitch {
                 VStack(spacing: 14) {
                     HStack(alignment: .top, spacing: 14) {
                         fileList
@@ -107,6 +107,7 @@ struct ChangesPane: View {
                     }
                     commitPanel
                 }
+            } narrow: {
                 VStack(spacing: 14) {
                     fileList
                     commitPanel
@@ -339,7 +340,7 @@ struct DiffPane: View {
     }
 
     var contentWidth: CGFloat {
-        let longest = lines.map { $0.text.count }.max() ?? 0
+        let longest = lines.reduce(0) { max($0, $1.text.utf16.count) }
         return 34 + 34 + 22 + CGFloat(longest) * 7.4 + 16
     }
 

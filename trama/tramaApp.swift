@@ -27,6 +27,7 @@ enum EntryPoint {
 struct TramaApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
     @StateObject private var model = AppModel()
+    @AppStorage(SidebarPreference.expanded) private var sidebarExpanded = true
 
     var body: some Scene {
         WindowGroup("Trama", id: "principal") {
@@ -64,6 +65,10 @@ struct TramaApp: App {
                 Divider()
                 Button("Achados & perdidos") { model.screen = .findings }
                     .keyboardShortcut("l", modifiers: [.command, .shift])
+                Button("Automações") { model.screen = .automations }
+                    .keyboardShortcut("a", modifiers: [.command, .shift])
+                Button("Repositórios") { model.screen = .repositories }
+                    .keyboardShortcut("g", modifiers: [.command, .shift])
                 Button("Atualizar e buscar remotos") {
                     Task {
                         await model.fetchRemotes()
@@ -72,6 +77,10 @@ struct TramaApp: App {
                 }
                 .keyboardShortcut("r")
                 Divider()
+                Button(sidebarExpanded ? "Reduzir barra lateral" : "Expandir barra lateral") {
+                    sidebarExpanded.toggle()
+                }
+                .keyboardShortcut("s", modifiers: [.command, .control])
                 Button("Alternar terminal") {
                     model.terminals.expanded.toggle()
                 }

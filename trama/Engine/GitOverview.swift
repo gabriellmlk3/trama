@@ -128,9 +128,15 @@ extension Git {
     }
 
     static func fileChanges(_ dir: String) -> [FileChange] {
-        guard let raw = try? run(dir, "status", "--porcelain", "-uall") else { return [] }
+        var rawStatus: String?
+        var rawStat: String?
+        runConcurrently([
+            { rawStatus = try? run(dir, "status", "--porcelain", "-uall") },
+            { rawStat = try? run(dir, "diff", "HEAD", "--numstat") }
+        ])
+        guard let raw = rawStatus else { return [] }
         var numbers: [String: (Int, Int)] = [:]
-        if let stat = try? run(dir, "diff", "HEAD", "--numstat") {
+        if let stat = rawStat {
             for line in stat.split(separator: "\n") {
                 let p = line.components(separatedBy: "\t")
                 guard p.count == 3 else { continue }
@@ -155,8 +161,14 @@ extension Git {
     }
 
     static func untrackedLines(_ path: String) -> Int {
-        guard let data = FileManager.default.contents(atPath: path), data.count < 1_000_000 else { return 0 }
-        return String(decoding: data, as: UTF8.self).split(separator: "\n", omittingEmptySubsequences: false).count - 1
+        guard let attributes = try? FileManager.default.attributesOfItem(atPath: path),
+              let size = (attributes[.size] as? NSNumber)?.intValue, size < 1_000_000 else { return 0 }
+        let stamp = LineCountCache.Stamp(size: size, modified: (attributes[.modificationDate] as? Date)?.timeIntervalSince1970 ?? 0)
+        if let hit = LineCountCache.shared.lines(path, stamp) { return hit }
+        guard let data = FileManager.default.contents(atPath: path) else { return 0 }
+        let lines = data.reduce(0) { $1 == 10 ? $0 + 1 : $0 }
+        LineCountCache.shared.store(path, stamp, lines)
+        return lines
     }
 
     static func fileDiff(_ dir: String, _ path: String, untracked: Bool) -> [DiffLine] {
@@ -220,23 +232,7 @@ extension Workspace {
     public func commitChanges(_ slug: String, repo name: String, paths: [String], message: String) throws -> Commit {
         let wt = worktreePath(slug, try repo(name).name)
         guard Paths.isDirectory(wt) else { throw TramaError("worktree não encontrado em \(Paths.abbreviate(wt))") }
-        let subject = message.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !subject.isEmpty else { throw TramaError("escreva uma mensagem de commit") }
-        guard !paths.isEmpty else { throw TramaError("escolha ao menos um arquivo para commitar") }
-        let all = Set(Git.fileChanges(wt).map(\.path))
-        let chosen = Set(paths)
-        guard chosen.isSubset(of: all) else { throw TramaError("a lista de arquivos mudou · recarregue e tente de novo") }
-        if chosen == all {
-            try Git.run(wt, "add", "-A")
-            try Git.run(wt, "commit", "--quiet", "-m", subject)
-        } else {
-            if Git.isMerging(wt) { throw TramaError("há um merge em andamento · o commit precisa incluir todos os arquivos") }
-            let list = chosen.sorted()
-            try Git.run(wt, ["add", "-A", "--"] + list)
-            try Git.run(wt, ["commit", "--quiet", "-m", subject, "--"] + list)
-        }
-        guard let made = Git.lastCommit(wt) else { throw TramaError("o commit não foi criado") }
-        return made
+        return try Git.commitPaths(wt, paths: paths, message: message)
     }
 
     public func commitAll(_ slug: String, messages: [String: String]) -> [String: String] {
@@ -279,17 +275,41 @@ public struct FindingChanges: Sendable {
 }
 
 extension Git {
+    @discardableResult
+    static func commitPaths(_ dir: String, paths: [String], message: String) throws -> Commit {
+        let subject = message.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !subject.isEmpty else { throw TramaError("escreva uma mensagem de commit") }
+        guard !paths.isEmpty else { throw TramaError("escolha ao menos um arquivo para commitar") }
+        let all = Set(fileChanges(dir).map(\.path))
+        let chosen = Set(paths)
+        guard chosen.isSubset(of: all) else { throw TramaError("a lista de arquivos mudou · recarregue e tente de novo") }
+        if chosen == all {
+            try run(dir, "add", "-A")
+            try run(dir, "commit", "--quiet", "-m", subject)
+        } else {
+            if isMerging(dir) { throw TramaError("há um merge em andamento · o commit precisa incluir todos os arquivos") }
+            let list = chosen.sorted()
+            try run(dir, ["add", "-A", "--"] + list)
+            try run(dir, ["commit", "--quiet", "-m", subject, "--"] + list)
+        }
+        guard let made = lastCommit(dir) else { throw TramaError("o commit não foi criado") }
+        return made
+    }
+
     static func rangeChanges(_ dir: String, from: String, to: String) -> [FileChange] {
-        let range = "\(from)...\(to)"
+        diffChanges(dir, ["\(from)...\(to)"])
+    }
+
+    static func diffChanges(_ dir: String, _ revisions: [String]) -> [FileChange] {
         var codes: [String: String] = [:]
-        if let names = try? run(dir, "diff", "--name-status", "--no-renames", range) {
+        if let names = try? run(dir, ["diff", "--name-status", "--no-renames"] + revisions) {
             for line in names.split(separator: "\n") {
                 let p = line.components(separatedBy: "\t")
                 guard p.count == 2 else { continue }
                 codes[p[1]] = p[0] == "A" ? "N" : (p[0] == "D" ? "D" : "M")
             }
         }
-        guard let stat = try? run(dir, "diff", "--numstat", "--no-renames", range) else { return [] }
+        guard let stat = try? run(dir, ["diff", "--numstat", "--no-renames"] + revisions) else { return [] }
         var out: [FileChange] = []
         for line in stat.split(separator: "\n") {
             let p = line.components(separatedBy: "\t")
@@ -300,7 +320,11 @@ extension Git {
     }
 
     static func rangeDiff(_ dir: String, from: String, to: String, path: String) -> [DiffLine] {
-        DiffParser.parse(execute(dir, ["diff", "--no-renames", "--unified=3", "\(from)...\(to)", "--", path]).output)
+        revisionDiff(dir, ["\(from)...\(to)"], path: path)
+    }
+
+    static func revisionDiff(_ dir: String, _ revisions: [String], path: String) -> [DiffLine] {
+        DiffParser.parse(execute(dir, ["diff", "--no-renames", "--unified=3"] + revisions + ["--", path]).output)
     }
 }
 
@@ -346,5 +370,30 @@ extension Workspace {
         case .range(let dir, let from, let to):
             return Git.rangeDiff(dir, from: from, to: to, path: change.path)
         }
+    }
+}
+
+private final class LineCountCache: @unchecked Sendable {
+    struct Stamp: Equatable {
+        var size: Int
+        var modified: TimeInterval
+    }
+
+    static let shared = LineCountCache()
+    private let lock = NSLock()
+    private var entries: [String: (stamp: Stamp, lines: Int)] = [:]
+
+    func lines(_ path: String, _ stamp: Stamp) -> Int? {
+        lock.lock()
+        defer { lock.unlock() }
+        guard let entry = entries[path], entry.stamp == stamp else { return nil }
+        return entry.lines
+    }
+
+    func store(_ path: String, _ stamp: Stamp, _ lines: Int) {
+        lock.lock()
+        defer { lock.unlock() }
+        if entries.count >= 4096 { entries.removeAll(keepingCapacity: true) }
+        entries[path] = (stamp, lines)
     }
 }

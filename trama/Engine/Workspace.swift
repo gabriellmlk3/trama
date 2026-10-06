@@ -64,11 +64,12 @@ public struct Config: Codable, Sendable {
     public var agentPullPolicy = AgentPullPolicy.free
     public var agentGrants: [String: AgentGrants] = [:]
     public var repos: [RepoConfig] = []
+    public var automations: [Automation] = []
 
     enum CodingKeys: String, CodingKey {
         case version = "versao", branchPrefix = "prefixoBranch", defaultBranch = "basePadrao"
         case context = "contexto", capsuleFolder = "pastaCapsulas", agentPullPolicy = "puxadaDeAgentes", repos
-        case agentGrants = "permissoesDeAgentes"
+        case agentGrants = "permissoesDeAgentes", automations = "automacoes"
     }
 
     public init() {}
@@ -83,6 +84,7 @@ public struct Config: Codable, Sendable {
         agentPullPolicy = (try? c.decodeIfPresent(AgentPullPolicy.self, forKey: .agentPullPolicy)) ?? .free
         agentGrants = (try? c.decodeIfPresent([String: AgentGrants].self, forKey: .agentGrants)) ?? [:]
         repos = try c.decodeIfPresent([RepoConfig].self, forKey: .repos) ?? []
+        automations = (try? c.decodeIfPresent([Automation].self, forKey: .automations)) ?? []
         if branchPrefix.isEmpty { branchPrefix = "trama/" }
         if defaultBranch.isEmpty { defaultBranch = "main" }
         if capsuleFolder.isEmpty { capsuleFolder = "tramas" }

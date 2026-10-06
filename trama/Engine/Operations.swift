@@ -162,9 +162,8 @@ extension Workspace {
         } catch {
             warnings.append(Warning(message: "não consegui escrever o CLAUDE.md da trama: \(errorMessage(error))"))
         }
-        for r in repos {
-            warnings += startPreparation(t, r)
-        }
+        warnings += startPreparations(t, repos) { applyWorktreePathRules(t) }
+        warnings += fire(.create, t)
         return (t, warnings)
     }
 
@@ -271,9 +270,9 @@ extension Workspace {
         }
         try? writeInstructions(t)
         try? addJournal(t.slug, "puxou \(added.joined(separator: ", ")) para a trama")
-        for r in repos where added.contains(r.name) {
-            warnings += startPreparation(t, r)
-        }
+        warnings += startPreparations(t, repos.filter { added.contains($0.name) }) { applyWorktreePathRules(t) }
+        warnings += refocusIfNeeded(t)
+        warnings += fire(.pull, t, added: added)
         return (t, warnings)
     }
 
@@ -299,6 +298,8 @@ extension Workspace {
         let updated = try updateTrama(t.slug) { x in
             x.repos.removeAll { $0 == r.name }
         }
+        applyWorktreePathRules(updated)
+        _ = refocusIfNeeded(updated)
         try? writeInstructions(updated)
         try? addJournal(updated.slug, "soltou \(r.name) da trama (a branch \(updated.branch) continua existindo)")
         return updated
@@ -315,6 +316,7 @@ extension Workspace {
         }
         let dirty = status.filter { $0.changed > 0 }.map { "\($0.repo) com \($0.changed) alterado(s)" }
         try? addJournal(updated.slug, "estacionada" + (dirty.isEmpty ? "" : " · " + dirty.joined(separator: ", ")))
+        fire(.park, updated)
         return (updated, status)
     }
 
@@ -341,6 +343,7 @@ extension Workspace {
             msg += " com rebase (" + results.map { "\($0.repo): \($0.situation)" }.joined(separator: ", ") + ")"
         }
         try? addJournal(updated.slug, msg)
+        fire(.resume, updated)
         return (updated, results)
     }
 
@@ -379,6 +382,9 @@ extension Workspace {
             if !dirty.isEmpty {
                 throw TramaError("há mudanças não commitadas em \(dirty.joined(separator: ", ")) · commite ou use --forcar")
             }
+        }
+        if focusedSlug() == t.slug {
+            _ = try? clearFocus()
         }
         for name in t.repos {
             guard let r = try? repo(name) else { continue }

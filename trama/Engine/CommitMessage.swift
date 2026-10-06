@@ -14,6 +14,10 @@ extension Workspace {
     public func suggestCommitMessage(_ slug: String, repo name: String, paths: [String]? = nil) throws -> String {
         let wt = worktreePath(slug, try repo(name).name)
         guard Paths.isDirectory(wt) else { throw TramaError("worktree não encontrado em \(Paths.abbreviate(wt))") }
+        return try Self.suggestCommitMessage(in: wt, name: name, paths: paths)
+    }
+
+    static func suggestCommitMessage(in wt: String, name: String, paths: [String]?) throws -> String {
         let changes = Git.fileChanges(wt).filter { paths?.contains($0.id) ?? true }
         guard !changes.isEmpty else { throw TramaError("não há mudanças em \(name)") }
         let prompt = Self.commitPrompt(

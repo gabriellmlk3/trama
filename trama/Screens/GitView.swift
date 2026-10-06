@@ -75,7 +75,6 @@ struct DetailBar: View {
 private struct LoadKey: Equatable {
     var slug: String
     var repo: String
-    var stamp: Int64
     var token: Int
     var compare: String?
 }
@@ -158,9 +157,10 @@ struct GitView: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         }
-        .task(id: LoadKey(slug: trama.slug, repo: currentRepo ?? "", stamp: model.state?.generatedAt ?? 0, token: refreshToken, compare: currentRepo.flatMap { compares[$0] })) {
+        .task(id: LoadKey(slug: trama.slug, repo: currentRepo ?? "", token: refreshToken, compare: currentRepo.flatMap { compares[$0] })) {
             await load()
         }
+        .onRefresh(model.clock) { await load() }
         .task(id: DiffKey(file: selectedFile, loadedAt: overview?.loadedAt ?? 0, signature: changeSignature)) {
             await loadDiff()
         }

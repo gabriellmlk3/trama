@@ -33,6 +33,14 @@ enum Theme {
     static let wait = Color(hex: 0xF2C14E)
     static let waitText = Color(hex: 0xF5D98A)
 
+    static let lanes: [Color] = [
+        ember, iris, ok, wait, Color(hex: 0x5FD1D1), Color(hex: 0xC792EA), Color(hex: 0x7C9CFF), danger,
+    ]
+
+    static func lane(_ index: Int) -> Color {
+        lanes[((index % lanes.count) + lanes.count) % lanes.count]
+    }
+
     static let ansi: [UInt32] = [
         0x1A1C22, 0xEF6F6C, 0x62D394, 0xF2C14E, 0x7C9CFF, 0xC792EA, 0x5FD1D1, 0xD5D7DC,
         0x4A4E57, 0xF4A3A1, 0x8FE0B0, 0xF5D98A, 0xA9B4FF, 0xDDB6F2, 0x9DE3E3, 0xECEDEF,
@@ -148,6 +156,40 @@ struct Chip: View {
             .frame(height: 22)
             .background(Capsule().fill(background))
             .overlay(Capsule().stroke(Theme.line2, lineWidth: 1))
+    }
+}
+
+struct StatusNote<Content: View>: View {
+    enum Tone { case ok, wait, neutral }
+    let icon: String
+    var tone: Tone = .neutral
+    @ViewBuilder let content: () -> Content
+
+    var tint: Color {
+        switch tone {
+        case .ok: return Theme.ok
+        case .wait: return Theme.wait
+        case .neutral: return Theme.faded
+        }
+    }
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Image(systemName: icon)
+                .font(.system(size: 11))
+                .foregroundStyle(tint)
+            content()
+        }
+        .font(Theme.mono(11.5))
+        .foregroundStyle(Theme.text3)
+        .lineLimit(1)
+        .frame(height: 26)
+    }
+}
+
+extension StatusNote where Content == Text {
+    init(icon: String, tone: Tone = .neutral, text: String) {
+        self.init(icon: icon, tone: tone) { Text(text) }
     }
 }
 

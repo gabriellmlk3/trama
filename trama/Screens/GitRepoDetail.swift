@@ -38,12 +38,13 @@ struct GitRepoDetail: View {
             chips
             ConflictsPanel(repo: repo.name, worktree: path)
             if let o = overview {
-                ViewThatFits(in: .horizontal) {
+                WidthSwitch(minWidth: 760) {
                     HStack(alignment: .top, spacing: 14) {
                         BranchThread(overview: o, status: status, trama: trama, repo: repo.name, worktree: path, compare: compare, onCompare: onCompare)
                         WorktreesCard(overview: o, repo: repo, trama: trama)
                             .frame(width: 300)
                     }
+                } narrow: {
                     VStack(spacing: 14) {
                         BranchThread(overview: o, status: status, trama: trama, repo: repo.name, worktree: path, compare: compare, onCompare: onCompare)
                         WorktreesCard(overview: o, repo: repo, trama: trama)
@@ -246,17 +247,23 @@ struct ToneChip: View {
         }
     }
 
+    var quiet: Bool { tone == .ok || tone == .plain }
+
     var body: some View {
         HStack(spacing: 6) {
-            if let icon { Image(systemName: icon).font(.system(size: 10)) }
+            if let icon {
+                Image(systemName: icon)
+                    .font(.system(size: 10, weight: quiet ? .semibold : .regular))
+                    .foregroundStyle(quiet ? tint : color)
+            }
             Text(text).lineLimit(1).truncationMode(.middle)
         }
         .font(tone == .plain ? .system(size: 11.5) : Theme.mono(11.5))
-        .foregroundStyle(color)
-        .padding(.horizontal, 10)
+        .foregroundStyle(quiet ? Theme.text3 : color)
+        .padding(.horizontal, quiet ? 4 : 10)
         .frame(height: 24)
-        .background(RoundedRectangle(cornerRadius: 7).fill(tint.opacity(tone == .plain ? 0.06 : 0.1)))
-        .overlay(RoundedRectangle(cornerRadius: 7).stroke(tint.opacity(tone == .plain ? 0.3 : 0.4), lineWidth: 1))
+        .background(RoundedRectangle(cornerRadius: 7).fill(quiet ? Color.clear : tint.opacity(0.1)))
+        .overlay(RoundedRectangle(cornerRadius: 7).stroke(quiet ? Color.clear : tint.opacity(0.4), lineWidth: 1))
     }
 }
 

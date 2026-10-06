@@ -111,6 +111,11 @@ struct TramaHeader: View {
                     if trama.isParked {
                         Chip(text: "estacionada \(relativeTime(trama.parkedAt))", color: Theme.waitText)
                     }
+                    if model.isFocused(trama.slug) {
+                        Chip(text: "em foco", color: Theme.emberText)
+                            .help("As automações de caminhos apontam as cópias principais para esta trama (tela Automações)")
+                    }
+                    AutomationRunChip(trama: trama)
                     TramaAgentBadge(agent: model.agents(for: trama.slug).first(where: { $0.isRoot }))
                 }
             }
@@ -125,6 +130,14 @@ struct TramaHeader: View {
                     MenuAction("Copiar nome da branch") { Terminal.copy(trama.branch) }
                     MenuAction("Abrir a trama no VS Code") { Task { await model.openInCode(trama.slug) } }
                     MenuAction("Abrir todos no editor") { Task { await model.openInEditor(trama.slug, repos: trama.repos) } }
+                    if model.isFocused(trama.slug) {
+                        MenuAction("Reaplicar o foco") { Task { await model.focus(trama.slug) } }
+                        MenuAction("Tirar o foco") { Task { await model.clearFocus() } }
+                    }
+                    if let log = trama.automationLog {
+                        MenuAction("Ver log das automações") { Terminal.openFile(log) }
+                    }
+                    MenuAction("Automações…") { model.screen = .automations }
                     if trama.context != nil || model.state?.context != nil {
                         MenuAction("Commitar cápsula no contexto") { Task { await model.sync(trama.slug) } }
                     }
@@ -156,6 +169,16 @@ struct TramaHeader: View {
                 .background(RoundedRectangle(cornerRadius: 8).fill(Theme.surface))
                 .overlay(RoundedRectangle(cornerRadius: 8).stroke(Theme.line2, lineWidth: 1))
                 .help("Mais ações")
+
+                if !model.isFocused(trama.slug) {
+                    Button {
+                        Task { await model.focus(trama.slug) }
+                    } label: {
+                        Label("Focar", systemImage: "scope")
+                    }
+                    .buttonStyle(GhostButton())
+                    .help("Troca de trama: as automações “ao focar” rodam e os caminhos das cópias principais passam a apontar para esta trama (tela Automações)")
+                }
 
                 if trama.isParked {
                     Button {
@@ -231,5 +254,22 @@ struct TramaHeader: View {
                 DialogAction("Arquivar", role: .destructive) { Task { await model.archive(trama.slug) } },
             ]
         )
+    }
+}
+
+struct AutomationRunChip: View {
+    let trama: LiveTrama
+
+    var body: some View {
+        if let state = trama.automation, state != AutomationRunState.done, let log = trama.automationLog {
+            let running = state == AutomationRunState.running
+            Button {
+                Terminal.openFile(log)
+            } label: {
+                Chip(text: running ? "automações rodando…" : "automação falhou", color: running ? Theme.irisText : Theme.dangerText)
+            }
+            .buttonStyle(.plain)
+            .help("Abrir o log das automações")
+        }
     }
 }

@@ -26,6 +26,16 @@ extension AppModel {
                 target: .trama(t.slug)
             ))
         }
+        for t in tramas where t.automation == AutomationRunState.failed {
+            items.append(AttentionItem(
+                id: "automation-\(t.slug)",
+                icon: "bolt.trianglebadge.exclamationmark",
+                tone: Theme.danger,
+                title: "Uma automação falhou",
+                detail: "\(t.title) · veja o log no cabeçalho da trama",
+                target: .trama(t.slug)
+            ))
+        }
         for t in tramas {
             for s in t.status {
                 if s.conflict == "conflito" {
@@ -95,9 +105,8 @@ struct HomeView: View {
                 .padding(.horizontal, 40)
                 .padding(.top, 8)
                 .padding(.bottom, 44)
-                .frame(maxWidth: 1180, alignment: .leading)
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
         }
         .scrollIndicators(.never)
     }
@@ -106,6 +115,7 @@ struct HomeView: View {
 struct HomeProposalCard: View {
     @EnvironmentObject var model: AppModel
     let proposal: Proposal
+    var maxWidth: CGFloat = 1100
     @State private var refining = false
     @State private var note = ""
     @State private var applying = false
@@ -181,7 +191,7 @@ struct HomeProposalCard: View {
             }
         }
         .padding(16)
-        .frame(maxWidth: 1100, alignment: .leading)
+        .frame(maxWidth: maxWidth, alignment: .leading)
         .background(RoundedRectangle(cornerRadius: 12).fill(Theme.surface))
         .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.ember.opacity(0.45), lineWidth: 1))
     }
@@ -217,7 +227,7 @@ struct HomeAgentBar: View {
     var body: some View {
         VStack(spacing: 12) {
             if let proposal = model.proposal {
-                HomeProposalCard(proposal: proposal)
+                HomeProposalCard(proposal: proposal, maxWidth: .infinity)
             }
             HomeAgentBox(session: session, showingChat: $showingChat)
         }
@@ -320,7 +330,7 @@ struct HomeAgentBox: View {
         }
         .padding(.horizontal, 14)
         .frame(height: 44)
-        .frame(maxWidth: 1100)
+        .frame(maxWidth: .infinity)
         .background(RoundedRectangle(cornerRadius: 11).fill(Theme.surface))
         .overlay(RoundedRectangle(cornerRadius: 11).stroke(Theme.line2, lineWidth: 1))
     }
@@ -425,7 +435,7 @@ struct HomeHero: View {
             .padding(.horizontal, 40)
             .padding(.top, 52)
             .padding(.bottom, 34)
-            .frame(maxWidth: 1180, alignment: .leading)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -577,6 +587,8 @@ struct AttentionRow: View {
             switch item.target {
             case .trama(let slug): model.select(slug)
             case .findings: model.screen = .findings
+            case .automations: model.screen = .automations
+            case .repositories: model.screen = .repositories
             case .home: model.screen = .home
             }
         } label: {
@@ -623,7 +635,7 @@ struct HomeActive: View {
                     .font(.system(size: 13))
                     .foregroundStyle(Theme.faded)
             } else {
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 300, maximum: 460), spacing: 16, alignment: .top)], spacing: 16) {
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 320), spacing: 16, alignment: .top)], spacing: 16) {
                     ForEach(tramas) { t in
                         HomeTramaCard(trama: t)
                     }
